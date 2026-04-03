@@ -1,0 +1,10 @@
+.DS_Store
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+Library/Caches/
+Library/Logs/
+.DocumentRevisions-V100/
+.TemporaryItems/
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent

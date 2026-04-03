@@ -1,0 +1,11 @@
+$RECYCLE.BIN/
+System Volume Information/
+pagefile.sys
+hiberfil.sys
+swapfile.sys
+Thumbs.db
+desktop.ini
+AppData/Local/Temp/
+AppData/Local/Microsoft/Windows/INetCache/
+NTUSER.DAT*
+ntuser.dat*

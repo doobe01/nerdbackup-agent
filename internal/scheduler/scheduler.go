@@ -132,6 +132,12 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 	log := logging.Log.With().Str("repo", repo.ID).Logger()
 	log.Info().Strs("paths", repo.Paths).Msg("Starting scheduled backup")
 
+	// Run pre-backup hook
+	if err := runPreHook(ctx, repo.PreBackupCommand); err != nil {
+		log.Error().Err(err).Msg("Pre-backup hook failed — skipping backup")
+		return
+	}
+
 	startedAt := time.Now()
 	storageEnv := buildStorageEnv(repo.StorageConfig)
 	runner := restic.NewRunner(s.resticBinary, repo.ResticRepoPath, repo.ResticPassword, storageEnv)
@@ -140,6 +146,9 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 	if err := runner.UnlockIfStale(ctx, 30*time.Minute); err != nil {
 		log.Warn().Err(err).Msg("Stale lock removal failed")
 	}
+
+	// Merge preset + custom exclude patterns
+	excludes := restic.MergeExcludes(repo.ExcludePresets, repo.ExcludePatterns)
 
 	// Build tags with NerdBackup metadata
 	tags := append(repo.Tags,
@@ -156,7 +165,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 	lastProgressReport := time.Time{}
 	summary, err := runner.Backup(ctx, restic.BackupOptions{
 		Paths:             repo.Paths,
-		Excludes:          repo.ExcludePatterns,
+		Excludes:          excludes,
 		Tags:              tags,
 		BandwidthLimitKiB: repo.BandwidthLimitKiB,
 	}, func(p restic.ProgressEntry) {
@@ -212,6 +221,17 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 
 	// Report to API (with retry + pending persistence)
 	s.client.ReportJob(ctx, report)
+
+	// Run post-backup hook (runs even if backup failed)
+	snapshotID := ""
+	dataAdded := int64(0)
+	filesNew := 0
+	if summary != nil {
+		snapshotID = summary.SnapshotID
+		dataAdded = summary.DataAdded
+		filesNew = summary.FilesNew
+	}
+	runPostHook(ctx, repo.PostBackupCommand, report.Status, snapshotID, dataAdded, filesNew, completedAt.Sub(startedAt))
 
 	// Health check every N backups
 	s.backupCounts[repo.ID]++
