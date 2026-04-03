@@ -28,7 +28,7 @@ func Load() (*AgentConfig, error) {
 	return &cfg, nil
 }
 
-// Save writes the config to disk.
+// Save writes the config to disk atomically (write to .tmp, then rename).
 func Save(cfg *AgentConfig) error {
 	path := ConfigPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -38,7 +38,11 @@ func Save(cfg *AgentConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 // Exists checks if a config file exists.

@@ -7,18 +7,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/doobe01/nerdbackup-agent/internal/logging"
 )
 
 func Install(binaryPath string) error {
-	// On Windows, create a scheduled task that runs at login
 	home, _ := os.UserHomeDir()
 	logDir := filepath.Join(home, ".nerdbackup")
 	os.MkdirAll(logDir, 0700)
 
 	taskName := "NerdBackupAgent"
 
-	// Delete existing task if present
-	exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").Run()
+	// Delete existing task if present (ignore error — may not exist)
+	if err := exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").Run(); err != nil {
+		logging.Log.Debug().Err(err).Msg("No existing scheduled task to delete")
+	}
 
 	// Create task that runs at user login
 	err := exec.Command("schtasks", "/Create",
@@ -33,7 +36,9 @@ func Install(binaryPath string) error {
 	}
 
 	// Start it now
-	exec.Command("schtasks", "/Run", "/TN", taskName).Run()
+	if err := exec.Command("schtasks", "/Run", "/TN", taskName).Run(); err != nil {
+		logging.Log.Warn().Err(err).Msg("Failed to start scheduled task immediately")
+	}
 
 	fmt.Printf("Scheduled task '%s' created.\n", taskName)
 	fmt.Println("Agent will start at login and is running now.")
