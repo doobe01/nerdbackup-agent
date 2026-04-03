@@ -153,6 +153,11 @@ func (c *Client) ShipLogs(ctx context.Context, lines []string) error {
 	return c.post(ctx, fmt.Sprintf("/api/v1/agents/%s/logs", c.agentID), LogBatch{Lines: lines}, nil, 2)
 }
 
+// PostDockerVolumes uploads discovered Docker volumes to the API.
+func (c *Client) PostDockerVolumes(ctx context.Context, data interface{}) error {
+	return c.post(ctx, fmt.Sprintf("/api/v1/agents/%s/docker/volumes", c.agentID), data, nil, 2)
+}
+
 // GetLatestVersion checks for agent updates.
 func (c *Client) GetLatestVersion(ctx context.Context) (*VersionInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/downloads/agent/latest", nil)
