@@ -4,13 +4,13 @@ import "time"
 
 // ProgressEntry is emitted by restic --json during backup.
 type ProgressEntry struct {
-	MessageType    string  `json:"message_type"` // "status" or "summary"
-	SecondsElapsed float64 `json:"seconds_elapsed,omitempty"`
-	PercentDone    float64 `json:"percent_done,omitempty"`
-	TotalFiles     int     `json:"total_files,omitempty"`
-	FilesDone      int     `json:"files_done,omitempty"`
-	TotalBytes     int64   `json:"total_bytes,omitempty"`
-	BytesDone      int64   `json:"bytes_done,omitempty"`
+	MessageType    string   `json:"message_type"`
+	SecondsElapsed float64  `json:"seconds_elapsed,omitempty"`
+	PercentDone    float64  `json:"percent_done,omitempty"`
+	TotalFiles     int      `json:"total_files,omitempty"`
+	FilesDone      int      `json:"files_done,omitempty"`
+	TotalBytes     int64    `json:"total_bytes,omitempty"`
+	BytesDone      int64    `json:"bytes_done,omitempty"`
 	CurrentFiles   []string `json:"current_files,omitempty"`
 }
 
@@ -47,4 +47,23 @@ type Snapshot struct {
 type RepoStats struct {
 	TotalSize      int64 `json:"total_size"`
 	TotalFileCount int   `json:"total_file_count"`
+}
+
+// Lock represents a restic lock entry.
+type Lock struct {
+	Time      time.Time `json:"time"`
+	Exclusive bool      `json:"exclusive"`
+	Hostname  string    `json:"hostname"`
+	Username  string    `json:"username"`
+	PID       int       `json:"pid"`
+	UID       int       `json:"uid"`
+	GID       int       `json:"gid"`
+}
+
+// BackupOptions configures a backup run.
+type BackupOptions struct {
+	Paths             []string
+	Excludes          []string
+	Tags              []string
+	BandwidthLimitKiB int
 }

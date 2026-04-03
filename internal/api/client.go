@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ type Client struct {
 	agentID    string
 	agentToken string
 	httpClient *http.Client
+	lastETag   string
 }
 
 func NewClient(baseURL, agentID, agentToken string) *Client {
@@ -27,8 +29,7 @@ func NewClient(baseURL, agentID, agentToken string) *Client {
 	}
 }
 
-// Register registers a new agent with the NerdBackup API.
-// Uses an API key for initial auth (not agent token).
+// Register registers a new agent. Uses API key auth (not agent token).
 func Register(baseURL, apiKey string, req RegisterAgentRequest) (*RegisterAgentResponse, error) {
 	body, _ := json.Marshal(req)
 	httpReq, err := http.NewRequest("POST", baseURL+"/api/v1/agents", bytes.NewReader(body))
@@ -56,62 +57,136 @@ func Register(baseURL, apiKey string, req RegisterAgentRequest) (*RegisterAgentR
 	return &result.Data, nil
 }
 
-// SendHeartbeat sends a heartbeat to the NerdBackup API.
-func (c *Client) SendHeartbeat(req HeartbeatRequest) error {
-	return c.post(fmt.Sprintf("/api/v1/agents/%s/heartbeat", c.agentID), req, nil)
+// SendHeartbeat sends a heartbeat. Returns config_changed flag.
+func (c *Client) SendHeartbeat(ctx context.Context, req HeartbeatRequest) (*HeartbeatResponse, error) {
+	var resp HeartbeatResponse
+	err := c.post(ctx, fmt.Sprintf("/api/v1/agents/%s/heartbeat", c.agentID), req, &resp, 3)
+	return &resp, err
 }
 
-// ReportJob reports a completed/failed job to the API.
-func (c *Client) ReportJob(req JobReportRequest) error {
-	return c.post(fmt.Sprintf("/api/v1/agents/%s/report", c.agentID), req, nil)
-}
-
-// GetRepos fetches the repo configurations for this agent.
-func (c *Client) GetRepos() ([]RepoConfig, error) {
-	var repos []RepoConfig
-	err := c.get(fmt.Sprintf("/api/v1/agents/%s/repos", c.agentID), &repos)
-	return repos, err
-}
-
-func (c *Client) get(path string, out interface{}) error {
-	req, err := http.NewRequest("GET", c.baseURL+path, nil)
+// ReportJob reports a completed/failed job. Retries 5x, then saves to pending.
+func (c *Client) ReportJob(ctx context.Context, req JobReportRequest) error {
+	err := c.post(ctx, fmt.Sprintf("/api/v1/agents/%s/report", c.agentID), req, nil, 5)
 	if err != nil {
-		return err
+		logging.Log.Warn().Err(err).Msg("Job report failed — saving to pending reports")
+		SavePendingReport(req)
+	}
+	return err
+}
+
+// FlushPendingReports retries any saved pending reports.
+func (c *Client) FlushPendingReports(ctx context.Context) {
+	reports := LoadPendingReports()
+	if len(reports) == 0 {
+		return
+	}
+
+	logging.Log.Info().Int("count", len(reports)).Msg("Retrying pending reports")
+	var remaining []JobReportRequest
+
+	for _, r := range reports {
+		err := c.post(ctx, fmt.Sprintf("/api/v1/agents/%s/report", c.agentID), r, nil, 2)
+		if err != nil {
+			remaining = append(remaining, r)
+		}
+	}
+
+	if len(remaining) == 0 {
+		ClearPendingReports()
+		logging.Log.Info().Msg("All pending reports flushed")
+	} else {
+		logging.Log.Warn().Int("remaining", len(remaining)).Msg("Some pending reports still failed")
+	}
+}
+
+// GetRepos fetches repo configs with ETag support.
+// Returns (repos, changed, error). If changed=false, repos is nil (304).
+func (c *Client) GetRepos(ctx context.Context) ([]RepoConfig, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+fmt.Sprintf("/api/v1/agents/%s/repos", c.agentID), nil)
+	if err != nil {
+		return nil, false, err
 	}
 	c.setHeaders(req)
+	if c.lastETag != "" {
+		req.Header.Set("If-None-Match", c.lastETag)
+	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doWithRetry(ctx, c.httpClient, req, 3)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 304 {
+		return nil, false, nil
+	}
+
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("GET %s failed (%d): %s", path, resp.StatusCode, string(b))
+		return nil, false, fmt.Errorf("GET repos failed (%d): %s", resp.StatusCode, string(b))
+	}
+
+	if etag := resp.Header.Get("ETag"); etag != "" {
+		c.lastETag = etag
 	}
 
 	var envelope ApiResponse[json.RawMessage]
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		return err
+		return nil, false, err
 	}
-	return json.Unmarshal(envelope.Data, out)
+
+	var repos []RepoConfig
+	if err := json.Unmarshal(envelope.Data, &repos); err != nil {
+		return nil, false, err
+	}
+
+	return repos, true, nil
 }
 
-func (c *Client) post(path string, body interface{}, out interface{}) error {
+// ReportProgress sends real-time backup progress. Best-effort, 1 retry.
+func (c *Client) ReportProgress(ctx context.Context, progress ProgressReport) {
+	_ = c.post(ctx, fmt.Sprintf("/api/v1/agents/%s/progress", c.agentID), progress, nil, 1)
+}
+
+// ShipLogs sends a batch of log lines.
+func (c *Client) ShipLogs(ctx context.Context, lines []string) error {
+	return c.post(ctx, fmt.Sprintf("/api/v1/agents/%s/logs", c.agentID), LogBatch{Lines: lines}, nil, 2)
+}
+
+// GetLatestVersion checks for agent updates.
+func (c *Client) GetLatestVersion(ctx context.Context) (*VersionInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/downloads/agent/latest", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := doWithRetry(ctx, c.httpClient, req, 1)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var envelope ApiResponse[VersionInfo]
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return nil, err
+	}
+	return &envelope.Data, nil
+}
+
+func (c *Client) post(ctx context.Context, path string, body interface{}, out interface{}, maxRetries int) error {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+path, bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+path, bytes.NewReader(jsonBody))
 	if err != nil {
 		return err
 	}
 	c.setHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doWithRetry(ctx, c.httpClient, req, maxRetries)
 	if err != nil {
 		return err
 	}
@@ -119,12 +194,15 @@ func (c *Client) post(path string, body interface{}, out interface{}) error {
 
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		logging.Log.Error().Int("status", resp.StatusCode).Str("path", path).Msg(string(b))
-		return fmt.Errorf("POST %s failed (%d)", path, resp.StatusCode)
+		return fmt.Errorf("POST %s failed (%d): %s", path, resp.StatusCode, string(b))
 	}
 
 	if out != nil {
-		return json.NewDecoder(resp.Body).Decode(out)
+		var envelope ApiResponse[json.RawMessage]
+		if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+			return err
+		}
+		return json.Unmarshal(envelope.Data, out)
 	}
 	return nil
 }

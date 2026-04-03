@@ -2,37 +2,50 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"time"
 
 	"github.com/doobe01/nerdbackup-agent/internal/api"
+	"github.com/doobe01/nerdbackup-agent/internal/config"
 	"github.com/doobe01/nerdbackup-agent/internal/logging"
 	"github.com/doobe01/nerdbackup-agent/internal/restic"
 	"github.com/robfig/cron/v3"
 )
 
-// Scheduler evaluates repo schedules and triggers restic backups.
+// Scheduler syncs config from the API and manages cron-scheduled backups.
 type Scheduler struct {
-	client        *api.Client
-	resticBinary  string
-	cron          *cron.Cron
-	lastRepos     []api.RepoConfig
-	syncInterval  time.Duration
+	client       *api.Client
+	resticBinary string
+	agentID      string
+	hostname     string
+	cron         *cron.Cron
+	lastRepos    []api.RepoConfig
+	syncInterval time.Duration
+	cfg          *config.AgentConfig
+	backupCounts map[string]int // repo ID → backup count since last health check
 }
 
 // New creates a scheduler.
-func New(client *api.Client, resticBinary string, syncInterval time.Duration) *Scheduler {
+func New(client *api.Client, resticBinary, agentID string, cfg *config.AgentConfig, syncInterval time.Duration) *Scheduler {
+	hostname, _ := os.Hostname()
 	return &Scheduler{
 		client:       client,
 		resticBinary: resticBinary,
+		agentID:      agentID,
+		hostname:     hostname,
 		cron:         cron.New(),
 		syncInterval: syncInterval,
+		cfg:          cfg,
+		backupCounts: make(map[string]int),
 	}
 }
 
-// Start begins the scheduler loop: syncs config and manages cron entries.
+// Start begins the scheduler loop.
 func (s *Scheduler) Start(ctx context.Context) {
-	s.syncAndSchedule()
+	// Flush any pending reports from previous run
+	s.client.FlushPendingReports(ctx)
+
+	s.syncAndSchedule(ctx)
 	s.cron.Start()
 
 	ticker := time.NewTicker(s.syncInterval)
@@ -45,66 +58,126 @@ func (s *Scheduler) Start(ctx context.Context) {
 			s.cron.Stop()
 			return
 		case <-ticker.C:
-			s.syncAndSchedule()
+			s.syncAndSchedule(ctx)
 		}
 	}
 }
 
-func (s *Scheduler) syncAndSchedule() {
-	repos, err := s.client.GetRepos()
+func (s *Scheduler) syncAndSchedule(ctx context.Context) {
+	repos, changed, err := s.client.GetRepos(ctx)
 	if err != nil {
 		logging.Log.Warn().Err(err).Msg("Failed to sync repo config")
 		return
 	}
 
-	logging.Log.Debug().Int("repos", len(repos)).Msg("Config synced")
-
-	// Rebuild cron entries if config changed
-	if !reposEqual(s.lastRepos, repos) {
-		logging.Log.Info().Int("repos", len(repos)).Msg("Config changed, rebuilding schedules")
-
-		// Clear existing entries
-		for _, entry := range s.cron.Entries() {
-			s.cron.Remove(entry.ID)
-		}
-
-		for _, repo := range repos {
-			if repo.ScheduleCron == "" {
-				continue
-			}
-			r := repo // capture
-			_, err := s.cron.AddFunc(r.ScheduleCron, func() {
-				s.runBackup(r)
-			})
-			if err != nil {
-				logging.Log.Error().Err(err).Str("repo", r.ID).Str("cron", r.ScheduleCron).Msg("Invalid cron expression")
-			}
-		}
-
-		s.lastRepos = repos
+	if !changed {
+		logging.Log.Debug().Msg("Config unchanged (304)")
+		return
 	}
+
+	logging.Log.Info().Int("repos", len(repos)).Msg("Config synced, rebuilding schedules")
+
+	// Auto-initialize new repos
+	for _, repo := range repos {
+		s.autoInitRepo(ctx, repo)
+	}
+
+	// Rebuild cron entries
+	for _, entry := range s.cron.Entries() {
+		s.cron.Remove(entry.ID)
+	}
+
+	for _, repo := range repos {
+		if repo.ScheduleCron == "" {
+			continue
+		}
+		r := repo // capture
+		_, err := s.cron.AddFunc(r.ScheduleCron, func() {
+			s.runBackup(ctx, r)
+		})
+		if err != nil {
+			logging.Log.Error().Err(err).Str("repo", r.ID).Str("cron", r.ScheduleCron).Msg("Invalid cron expression")
+		}
+	}
+
+	s.lastRepos = repos
 }
 
-func (s *Scheduler) runBackup(repo api.RepoConfig) {
+func (s *Scheduler) autoInitRepo(ctx context.Context, repo api.RepoConfig) {
+	if s.cfg.IsRepoInitialized(repo.ID) {
+		return
+	}
+
+	storageEnv := buildStorageEnv(repo.StorageConfig)
+	runner := restic.NewRunner(s.resticBinary, repo.ResticRepoPath, repo.ResticPassword, storageEnv)
+
+	if runner.IsInitialized(ctx) {
+		s.cfg.MarkRepoInitialized(repo.ID)
+		config.Save(s.cfg)
+		return
+	}
+
+	logging.Log.Info().Str("repo", repo.ID).Msg("Initializing new restic repo")
+	if err := runner.Init(ctx); err != nil {
+		logging.Log.Error().Err(err).Str("repo", repo.ID).Msg("Failed to init repo")
+		return
+	}
+
+	s.cfg.MarkRepoInitialized(repo.ID)
+	config.Save(s.cfg)
+	logging.Log.Info().Str("repo", repo.ID).Msg("Repo initialized")
+}
+
+func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 	log := logging.Log.With().Str("repo", repo.ID).Logger()
 	log.Info().Strs("paths", repo.Paths).Msg("Starting scheduled backup")
 
 	startedAt := time.Now()
-
-	// Build restic runner
 	storageEnv := buildStorageEnv(repo.StorageConfig)
-	runner := restic.NewRunner(s.resticBinary, repo.ResticRepoPath, repo.ResticPasswordEncrypted, storageEnv)
+	runner := restic.NewRunner(s.resticBinary, repo.ResticRepoPath, repo.ResticPassword, storageEnv)
 
-	ctx := context.Background()
+	// Remove stale locks before backup
+	if err := runner.UnlockIfStale(ctx, 30*time.Minute); err != nil {
+		log.Warn().Err(err).Msg("Stale lock removal failed")
+	}
 
-	// Run backup
-	summary, err := runner.Backup(ctx, repo.Paths, repo.ExcludePatterns, repo.Tags, func(p restic.ProgressEntry) {
+	// Build tags with NerdBackup metadata
+	tags := append(repo.Tags,
+		"nerdbackup:agent_id="+s.agentID,
+		"nerdbackup:repo_id="+repo.ID,
+		"nerdbackup:hostname="+s.hostname,
+		"nerdbackup:trigger=scheduled",
+	)
+	if repo.PolicyID != "" {
+		tags = append(tags, "nerdbackup:policy_id="+repo.PolicyID)
+	}
+
+	// Run backup with progress reporting
+	lastProgressReport := time.Time{}
+	summary, err := runner.Backup(ctx, restic.BackupOptions{
+		Paths:             repo.Paths,
+		Excludes:          repo.ExcludePatterns,
+		Tags:              tags,
+		BandwidthLimitKiB: repo.BandwidthLimitKiB,
+	}, func(p restic.ProgressEntry) {
 		log.Debug().Float64("percent", p.PercentDone*100).Int64("bytes", p.BytesDone).Msg("Progress")
+
+		// Report progress to API every 10 seconds
+		if time.Since(lastProgressReport) > 10*time.Second {
+			s.client.ReportProgress(ctx, api.ProgressReport{
+				RepoID:         repo.ID,
+				PercentDone:    p.PercentDone,
+				BytesProcessed: p.BytesDone,
+				FilesProcessed: p.FilesDone,
+				StartedAt:      startedAt.Format(time.RFC3339),
+			})
+			lastProgressReport = time.Now()
+		}
 	})
 
 	completedAt := time.Now()
 
-	// Report to API
+	// Build job report
 	report := api.JobReportRequest{
 		RepoID:      repo.ID,
 		PolicyID:    repo.PolicyID,
@@ -131,10 +204,24 @@ func (s *Scheduler) runBackup(repo api.RepoConfig) {
 			TotalDurationSec:    int(summary.TotalDuration),
 		}
 		log.Info().Str("snapshot", summary.SnapshotID).Int64("added", summary.DataAdded).Msg("Backup completed")
+
+		// Update last backup time
+		s.cfg.LastBackupAt = completedAt.Format(time.RFC3339)
+		config.Save(s.cfg)
 	}
 
-	if reportErr := s.client.ReportJob(report); reportErr != nil {
-		log.Error().Err(reportErr).Msg("Failed to report job to API")
+	// Report to API (with retry + pending persistence)
+	s.client.ReportJob(ctx, report)
+
+	// Health check every N backups
+	s.backupCounts[repo.ID]++
+	if repo.CheckEveryNBackups > 0 && s.backupCounts[repo.ID]%repo.CheckEveryNBackups == 0 {
+		log.Info().Msg("Running periodic health check")
+		if checkErr := runner.Check(ctx); checkErr != nil {
+			log.Error().Err(checkErr).Msg("Health check failed")
+		} else {
+			log.Info().Msg("Health check passed")
+		}
 	}
 }
 
@@ -147,16 +234,4 @@ func buildStorageEnv(cfg api.StorageBackendConfig) map[string]string {
 		env["AWS_DEFAULT_REGION"] = cfg.Region
 	}
 	return env
-}
-
-func reposEqual(a, b []api.RepoConfig) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].ID != b[i].ID || a[i].ScheduleCron != b[i].ScheduleCron || fmt.Sprintf("%v", a[i].Paths) != fmt.Sprintf("%v", b[i].Paths) {
-			return false
-		}
-	}
-	return true
 }

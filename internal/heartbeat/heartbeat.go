@@ -11,11 +11,11 @@ import (
 )
 
 // Start sends a heartbeat every interval until ctx is cancelled.
-func Start(ctx context.Context, client *api.Client, agentVersion, resticVersion string, interval time.Duration) {
+func Start(ctx context.Context, client *api.Client, agentVersion, resticVersion string, startedAt time.Time, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	send(client, agentVersion, resticVersion)
+	send(ctx, client, agentVersion, resticVersion, startedAt)
 
 	for {
 		select {
@@ -23,12 +23,12 @@ func Start(ctx context.Context, client *api.Client, agentVersion, resticVersion 
 			logging.Log.Info().Msg("Heartbeat stopped")
 			return
 		case <-ticker.C:
-			send(client, agentVersion, resticVersion)
+			send(ctx, client, agentVersion, resticVersion, startedAt)
 		}
 	}
 }
 
-func send(client *api.Client, agentVersion, resticVersion string) {
+func send(ctx context.Context, client *api.Client, agentVersion, resticVersion string, startedAt time.Time) {
 	hostname, _ := os.Hostname()
 
 	req := api.HeartbeatRequest{
@@ -37,14 +37,16 @@ func send(client *api.Client, agentVersion, resticVersion string) {
 		Platform:      runtime.GOOS,
 		Arch:          runtime.GOARCH,
 		Hostname:      hostname,
+		UptimeSeconds: int64(time.Since(startedAt).Seconds()),
 		CPUCount:      runtime.NumCPU(),
 		MemTotalBytes: getTotalMemory(),
 		DiskFreeBytes: getFreeDisk(),
 	}
 
-	if err := client.SendHeartbeat(req); err != nil {
+	resp, err := client.SendHeartbeat(ctx, req)
+	if err != nil {
 		logging.Log.Warn().Err(err).Msg("Heartbeat failed")
 	} else {
-		logging.Log.Debug().Msg("Heartbeat sent")
+		logging.Log.Debug().Bool("config_changed", resp.ConfigChanged).Msg("Heartbeat sent")
 	}
 }
