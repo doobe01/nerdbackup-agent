@@ -5,13 +5,24 @@ import (
 	"strings"
 )
 
-//go:embed presets/*.txt
+//go:embed presets/*.txt presets/*.sh
 var presetFS embed.FS
 
 var presetNames = map[string]string{
-	"developer": "presets/developer.txt",
-	"macos":     "presets/macos.txt",
-	"windows":   "presets/windows.txt",
+	"developer":   "presets/developer.txt",
+	"macos":       "presets/macos.txt",
+	"windows":     "presets/windows.txt",
+	"full-system": "presets/full-system.txt",
+}
+
+// GetPresetPreHook returns the embedded pre-backup hook script for a preset, if any.
+func GetPresetPreHook(name string) string {
+	filename := "presets/" + name + "-pre.sh"
+	data, err := presetFS.ReadFile(filename)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // GetPresetExcludes returns the exclude patterns for a named preset.

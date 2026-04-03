@@ -106,8 +106,19 @@ type RepoConfig struct {
 	PreBackupCommand   string               `json:"pre_backup_command,omitempty"`
 	PostBackupCommand  string               `json:"post_backup_command,omitempty"`
 	CheckEveryNBackups int                  `json:"check_every_n_backups"`
+	Preset             string               `json:"preset,omitempty"` // "full-system", "docker-stop", "docker-hot"
 	StorageConfig      StorageBackendConfig `json:"storage_config"`
 	ConfigHash         string               `json:"config_hash,omitempty"`
+}
+
+// SystemMetadata is captured by the full-system preset pre-hook.
+type SystemMetadata struct {
+	BootMode        string   `json:"boot_mode"`         // "UEFI" or "BIOS"
+	Hostname        string   `json:"hostname"`
+	Kernel          string   `json:"kernel"`
+	Packages        []string `json:"packages,omitempty"` // installed package names
+	EnabledServices []string `json:"enabled_services,omitempty"`
+	DiskUsage       string   `json:"disk_usage,omitempty"`
 }
 
 type StorageBackendConfig struct {

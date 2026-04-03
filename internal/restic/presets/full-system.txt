@@ -1,0 +1,28 @@
+# Full System Backup — Linux
+# Excludes virtual/kernel filesystems, caches, and container runtimes
+/proc/*
+/sys/*
+/dev/*
+/run/*
+/tmp/*
+/var/tmp/*
+/mnt/*
+/media/*
+/swapfile
+/swap.img
+/var/lib/docker/*
+/var/lib/containerd/*
+/var/lib/lxc/*
+/var/cache/apt/archives/*
+/var/cache/yum/*
+/var/cache/dnf/*
+/var/cache/pacman/pkg/*
+/root/.cache/restic/*
+/home/*/.cache/restic/*
+/snap/*
+/var/snap/*/common/caches/*
+/var/log/journal/*
+/var/log/*.gz
+/var/log/*.old
+/core
+/lost+found
