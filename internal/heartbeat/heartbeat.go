@@ -8,7 +8,6 @@ import (
 
 	"github.com/doobe01/nerdbackup-agent/internal/api"
 	"github.com/doobe01/nerdbackup-agent/internal/logging"
-	"golang.org/x/sys/unix"
 )
 
 // Start sends a heartbeat every interval until ctx is cancelled.
@@ -16,7 +15,6 @@ func Start(ctx context.Context, client *api.Client, agentVersion, resticVersion 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	// Send one immediately
 	send(client, agentVersion, resticVersion)
 
 	for {
@@ -41,7 +39,7 @@ func send(client *api.Client, agentVersion, resticVersion string) {
 		Hostname:      hostname,
 		CPUCount:      runtime.NumCPU(),
 		MemTotalBytes: getTotalMemory(),
-		DiskFreeBytes: getFreeDisk("/"),
+		DiskFreeBytes: getFreeDisk(),
 	}
 
 	if err := client.SendHeartbeat(req); err != nil {
@@ -49,20 +47,4 @@ func send(client *api.Client, agentVersion, resticVersion string) {
 	} else {
 		logging.Log.Debug().Msg("Heartbeat sent")
 	}
-}
-
-func getTotalMemory() int64 {
-	var info unix.Sysinfo_t
-	if err := unix.Sysinfo(&info); err != nil {
-		return 0
-	}
-	return int64(info.Totalram) * int64(info.Unit)
-}
-
-func getFreeDisk(path string) int64 {
-	var stat unix.Statfs_t
-	if err := unix.Statfs(path, &stat); err != nil {
-		return 0
-	}
-	return int64(stat.Bavail) * int64(stat.Bsize)
 }
