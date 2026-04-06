@@ -20,6 +20,7 @@ import (
 	"github.com/doobe01/nerdbackup-agent/internal/restic"
 	"github.com/doobe01/nerdbackup-agent/internal/scheduler"
 	"github.com/doobe01/nerdbackup-agent/internal/service"
+	"github.com/doobe01/nerdbackup-agent/internal/updater"
 	"github.com/spf13/cobra"
 )
 
@@ -210,8 +211,6 @@ func runAgent(ctx context.Context, cfg *config.AgentConfig) error {
 
 	logging.Log.Info().Str("agent_id", cfg.AgentID).Str("version", version).Msg("Starting NerdBackup Agent")
 
-	go checkForUpdates(cfg)
-
 	resticBinary, err := restic.FindOrInstall()
 	if err != nil {
 		return fmt.Errorf("restic not available: %w", err)
@@ -226,6 +225,28 @@ func runAgent(ctx context.Context, cfg *config.AgentConfig) error {
 	// Start scheduler
 	sched := scheduler.New(client, resticBinary, cfg.AgentID, cfg, 5*time.Minute)
 	go sched.Start(ctx)
+
+	// Start auto-updater (checks every hour, downloads + swaps binary if new version)
+	autoUpdater := updater.New(version)
+	go func() {
+		// Initial check after 30 seconds
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				if autoUpdater.CheckAndUpdate(ctx) {
+					logging.Log.Info().Msg("Auto-update installed — restarting service")
+					// On Windows, the service manager will restart us.
+					// On Linux/macOS, systemd/launchd will restart us.
+					os.Exit(0)
+				}
+				timer.Reset(5 * time.Minute)
+			}
+		}
+	}()
 
 	logging.Log.Info().Msg("Agent running")
 

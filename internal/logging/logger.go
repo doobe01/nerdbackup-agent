@@ -25,33 +25,42 @@ func LogFilePath() string {
 	return filepath.Join(home, ".nerdbackup", "agent.log")
 }
 
+// syncWriter wraps a file and syncs after each write to ensure logs are flushed.
+type syncWriter struct {
+	f *os.File
+}
+
+func (w *syncWriter) Write(p []byte) (n int, err error) {
+	n, err = w.f.Write(p)
+	if err == nil {
+		_ = w.f.Sync()
+	}
+	return
+}
+
 func Init(debug bool) {
 	zerolog.TimeFieldFormat = time.RFC3339
 
-	// Set up file logging
 	logPath := LogFilePath()
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
+
+	// Rotate: if log file > 10MB, rename to .old and start fresh
+	if info, err := os.Stat(logPath); err == nil && info.Size() > 10*1024*1024 {
+		_ = os.Rename(logPath, logPath+".old")
+	}
 
 	logFile, fileErr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 
 	var writers []io.Writer
 
-	// Console writer
 	if debug {
 		writers = append(writers, zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05"})
 	} else {
 		writers = append(writers, os.Stderr)
 	}
 
-	// File writer (JSON format for machine parsing)
 	if fileErr == nil {
-		writers = append(writers, logFile)
-
-		// Truncate if over 10MB
-		if info, err := logFile.Stat(); err == nil && info.Size() > 10*1024*1024 {
-			_ = logFile.Truncate(0)
-			_, _ = logFile.Seek(0, 0)
-		}
+		writers = append(writers, &syncWriter{f: logFile})
 	}
 
 	multi := io.MultiWriter(writers...)

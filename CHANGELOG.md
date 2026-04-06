@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-04-06
+
+### Added
+- Silent auto-update: agent checks for new versions hourly, downloads and swaps binary automatically
+- Service restarts after update (Windows Service Manager / systemd / launchd handle restart)
+- Config, agent ID, tokens, and repos are preserved during updates — only the binary changes
+
+### Fixed
+- File logging: sync after each write to ensure logs flush immediately
+- Log rotation: renames to `.old` at 10MB instead of in-place truncation
+
 ## [0.2.8] - 2026-04-06
 
 ### Fixed
