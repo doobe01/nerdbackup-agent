@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-04-06
+
+### Fixed
+- Dashboard-triggered backups no longer create duplicate job entries — passes `dashboard_job_id` to update existing pending job
+
 ## [0.2.7] - 2026-04-06
 
 ### Added
