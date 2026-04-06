@@ -1,6 +1,8 @@
 package restic
 
 import (
+	"archive/zip"
+	"compress/bzip2"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,8 +19,13 @@ const resticVersion = "0.17.3"
 
 // FindOrInstall locates restic in PATH, or downloads it.
 func FindOrInstall() (string, error) {
+	binaryName := "restic"
+	if runtime.GOOS == "windows" {
+		binaryName = "restic.exe"
+	}
+
 	// Check PATH first
-	if path, err := exec.LookPath("restic"); err == nil {
+	if path, err := exec.LookPath(binaryName); err == nil {
 		ver, _ := getVersion(path)
 		logging.Log.Info().Str("path", path).Str("version", ver).Msg("Found restic in PATH")
 		return path, nil
@@ -27,7 +34,7 @@ func FindOrInstall() (string, error) {
 	// Install to ~/.local/bin
 	home, _ := os.UserHomeDir()
 	installDir := filepath.Join(home, ".local", "bin")
-	installPath := filepath.Join(installDir, "restic")
+	installPath := filepath.Join(installDir, binaryName)
 
 	if _, err := os.Stat(installPath); err == nil {
 		ver, _ := getVersion(installPath)
@@ -42,7 +49,7 @@ func FindOrInstall() (string, error) {
 	}
 
 	url := downloadURL()
-	if err := downloadFile(installPath, url); err != nil {
+	if err := downloadAndExtract(installPath, url); err != nil {
 		return "", fmt.Errorf("download restic: %w", err)
 	}
 
@@ -68,8 +75,8 @@ func downloadURL() string {
 	)
 }
 
-func downloadFile(dest string, url string) error {
-	resp, err := http.Get(url)
+func downloadAndExtract(dest string, url string) error {
+	resp, err := http.Get(url) //nolint:gosec
 	if err != nil {
 		return err
 	}
@@ -79,14 +86,66 @@ func downloadFile(dest string, url string) error {
 		return fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
 	}
 
+	if strings.HasSuffix(url, ".zip") {
+		return extractZip(dest, resp.Body)
+	}
+	return extractBz2(dest, resp.Body)
+}
+
+func extractBz2(dest string, r io.Reader) error {
+	bzReader := bzip2.NewReader(r)
 	out, err := os.Create(dest)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-
-	_, err = io.Copy(out, resp.Body)
+	_, err = io.Copy(out, bzReader)
 	return err
+}
+
+func extractZip(dest string, r io.Reader) error {
+	// Download to temp file first (zip needs random access)
+	tmp, err := os.CreateTemp("", "restic-*.zip")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	if _, err := io.Copy(tmp, r); err != nil {
+		return err
+	}
+
+	stat, err := tmp.Stat()
+	if err != nil {
+		return err
+	}
+
+	zr, err := zip.NewReader(tmp, stat.Size())
+	if err != nil {
+		return err
+	}
+
+	for _, f := range zr.File {
+		if strings.Contains(f.Name, "restic") && !f.FileInfo().IsDir() {
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			defer rc.Close()
+
+			out, err := os.Create(dest)
+			if err != nil {
+				return err
+			}
+			defer out.Close()
+
+			_, err = io.Copy(out, rc)
+			return err
+		}
+	}
+
+	return fmt.Errorf("restic binary not found in zip archive")
 }
 
 func getVersion(binary string) (string, error) {

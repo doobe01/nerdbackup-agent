@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+- Restic auto-installer now extracts `.bz2`/`.zip` archives instead of saving raw archive as binary
+- Windows: install restic as `restic.exe` (was missing `.exe` extension)
+
 ## [0.1.1] - 2026-04-06
 
 ### Added
