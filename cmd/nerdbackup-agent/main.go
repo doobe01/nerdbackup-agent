@@ -137,11 +137,16 @@ func initCmd() *cobra.Command {
 
 			// Auto-install service when using install token (zero-touch flow)
 			if installToken != "" {
-				logging.Log.Info().Msg("Auto-installing as system service")
-				if err := service.Install(); err != nil {
-					logging.Log.Warn().Err(err).Msg("Failed to auto-install service — you can run 'nerdbackup-agent install-service' manually")
+				binaryPath, binErr := os.Executable()
+				if binErr != nil {
+					logging.Log.Warn().Err(binErr).Msg("Could not determine binary path for service install")
 				} else {
-					logging.Log.Info().Msg("Service installed and started")
+					logging.Log.Info().Msg("Auto-installing as system service")
+					if svcErr := service.Install(binaryPath); svcErr != nil {
+						logging.Log.Warn().Err(svcErr).Msg("Failed to auto-install service — you can run 'nerdbackup-agent install-service' manually")
+					} else {
+						logging.Log.Info().Msg("Service installed and started")
+					}
 				}
 			}
 
