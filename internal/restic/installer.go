@@ -31,7 +31,17 @@ func FindOrInstall() (string, error) {
 		return path, nil
 	}
 
-	// Install to ~/.local/bin
+	// Check next to the agent binary (important for Windows Service / LOCAL SYSTEM)
+	if selfPath, err := os.Executable(); err == nil {
+		siblingPath := filepath.Join(filepath.Dir(selfPath), binaryName)
+		if _, err := os.Stat(siblingPath); err == nil {
+			ver, _ := getVersion(siblingPath)
+			logging.Log.Info().Str("path", siblingPath).Str("version", ver).Msg("Found restic next to agent binary")
+			return siblingPath, nil
+		}
+	}
+
+	// Check ~/.local/bin
 	home, _ := os.UserHomeDir()
 	installDir := filepath.Join(home, ".local", "bin")
 	installPath := filepath.Join(installDir, binaryName)
@@ -42,7 +52,15 @@ func FindOrInstall() (string, error) {
 		return installPath, nil
 	}
 
-	logging.Log.Info().Str("version", resticVersion).Msg("Downloading restic")
+	// On Windows, prefer installing next to the agent binary (works for LOCAL SYSTEM)
+	if runtime.GOOS == "windows" {
+		if selfPath, err := os.Executable(); err == nil {
+			installDir = filepath.Dir(selfPath)
+			installPath = filepath.Join(installDir, binaryName)
+		}
+	}
+
+	logging.Log.Info().Str("version", resticVersion).Str("dest", installDir).Msg("Downloading restic")
 
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		return "", err
