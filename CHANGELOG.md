@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-06
+
 ### Added
 - Zero-touch install: `--install-token` flag for `init` command — auto-registers, installs restic, installs service, starts agent
 - `RegisterWithToken` API method for pre-authenticated registration
