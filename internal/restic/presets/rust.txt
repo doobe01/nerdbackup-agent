@@ -1,0 +1,10 @@
+# Rust projects
+target/debug/
+target/release/deps/
+target/release/build/
+target/release/incremental/
+.cargo/registry/cache/
+.cargo/registry/src/
+.cargo/git/checkouts/
+*.rlib
+*.rmeta

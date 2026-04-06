@@ -1,0 +1,12 @@
+# Database servers — exclude temp/cache files (back up data dirs separately)
+/var/lib/postgresql/*/pg_stat_tmp/
+/var/lib/postgresql/*/pg_replslot/
+/var/lib/postgresql/*/pg_notify/
+/var/lib/mysql/*-relay-bin.*
+/var/lib/mysql/*.pid
+/var/lib/mysql/performance_schema/
+/var/lib/redis/temp-*
+/var/lib/redis/appendonly.aof.*.incr
+/var/lib/mongodb/journal/
+/var/lib/mongodb/WiredTiger.lock
+/var/lib/mongodb/_tmp/

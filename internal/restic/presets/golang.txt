@@ -1,0 +1,9 @@
+# Go projects
+vendor/
+.go/pkg/mod/cache/
+.go/pkg/mod/download/
+*.test
+*.out
+__debug_bin*
+coverage.txt
+coverage.html

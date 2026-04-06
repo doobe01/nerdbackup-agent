@@ -1,0 +1,10 @@
+# Ruby projects
+.bundle/
+vendor/bundle/
+vendor/cache/
+tmp/cache/
+tmp/pids/
+tmp/sockets/
+log/*.log
+.byebug_history
+coverage/

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"text/template"
 )
@@ -33,6 +34,8 @@ const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 `
 
+const label = "com.nerdbackup.agent"
+
 type serviceData struct {
 	Binary string
 	Home   string
@@ -45,10 +48,9 @@ func Install(binaryPath string) error {
 		return fmt.Errorf("create LaunchAgents dir: %w", err)
 	}
 
-	// Ensure log directory exists
-	os.MkdirAll(filepath.Join(home, ".nerdbackup"), 0700)
+	_ = os.MkdirAll(filepath.Join(home, ".nerdbackup"), 0700)
 
-	plistPath := filepath.Join(dir, "com.nerdbackup.agent.plist")
+	plistPath := filepath.Join(dir, label+".plist")
 	f, err := os.Create(plistPath)
 	if err != nil {
 		return fmt.Errorf("create plist: %w", err)
@@ -60,8 +62,19 @@ func Install(binaryPath string) error {
 		return fmt.Errorf("write plist: %w", err)
 	}
 
-	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
-		return fmt.Errorf("launchctl load: %w", err)
+	// Try modern launchctl bootstrap first (macOS 10.13+), fall back to load
+	uid := getUID()
+	domain := fmt.Sprintf("gui/%s", uid)
+
+	// Unload existing if present (ignore error)
+	_ = exec.Command("launchctl", "bootout", domain+"/"+label).Run()
+
+	// Try bootstrap (modern)
+	if err := exec.Command("launchctl", "bootstrap", domain, plistPath).Run(); err != nil {
+		// Fall back to legacy load for older macOS
+		if loadErr := exec.Command("launchctl", "load", plistPath).Run(); loadErr != nil {
+			return fmt.Errorf("launchctl failed (tried bootstrap and load): %w", loadErr)
+		}
 	}
 
 	fmt.Printf("Service installed at %s\n", plistPath)
@@ -69,4 +82,12 @@ func Install(binaryPath string) error {
 	fmt.Println("  launchctl list | grep nerdbackup")
 	fmt.Println("  tail -f ~/.nerdbackup/agent.log")
 	return nil
+}
+
+func getUID() string {
+	u, err := user.Current()
+	if err != nil {
+		return "501" // Default macOS user UID
+	}
+	return u.Uid
 }

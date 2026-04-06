@@ -1,0 +1,9 @@
+# Kubernetes node
+/var/lib/kubelet/pods/
+/var/lib/kubelet/pod-resources/
+/var/lib/etcd/member/wal/
+/var/log/pods/
+/var/log/containers/
+/run/containerd/
+/run/flannel/
+/tmp/etcd-*

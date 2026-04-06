@@ -3,14 +3,15 @@
 package heartbeat
 
 import (
+	"os"
 	"syscall"
 	"unsafe"
 )
 
 var (
-	kernel32              = syscall.NewLazyDLL("kernel32.dll")
-	globalMemoryStatusEx  = kernel32.NewProc("GlobalMemoryStatusEx")
-	getDiskFreeSpaceExW   = kernel32.NewProc("GetDiskFreeSpaceExW")
+	kernel32             = syscall.NewLazyDLL("kernel32.dll")
+	globalMemoryStatusEx = kernel32.NewProc("GlobalMemoryStatusEx")
+	getDiskFreeSpaceExW  = kernel32.NewProc("GetDiskFreeSpaceExW")
 )
 
 type memoryStatusEx struct {
@@ -36,7 +37,18 @@ func getTotalMemory() int64 {
 }
 
 func getFreeDisk() int64 {
-	path, _ := syscall.UTF16PtrFromString("C:\\")
+	// Use the home directory's drive instead of hardcoded C:
+	home, err := os.UserHomeDir()
+	if err != nil || len(home) < 3 {
+		home = "C:\\"
+	} else {
+		home = home[:3] // e.g. "C:\"
+	}
+
+	path, err := syscall.UTF16PtrFromString(home)
+	if err != nil {
+		return 0
+	}
 	var freeBytes uint64
 	ret, _, _ := getDiskFreeSpaceExW.Call(
 		uintptr(unsafe.Pointer(path)),

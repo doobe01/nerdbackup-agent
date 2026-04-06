@@ -13,6 +13,12 @@ var presetNames = map[string]string{
 	"macos":       "presets/macos.txt",
 	"windows":     "presets/windows.txt",
 	"full-system": "presets/full-system.txt",
+	"golang":      "presets/golang.txt",
+	"rust":        "presets/rust.txt",
+	"ruby":        "presets/ruby.txt",
+	"docker":      "presets/docker.txt",
+	"kubernetes":  "presets/kubernetes.txt",
+	"database":    "presets/database.txt",
 }
 
 // GetPresetPreHook returns the embedded pre-backup hook script for a preset, if any.

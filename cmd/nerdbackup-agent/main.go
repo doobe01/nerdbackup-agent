@@ -631,11 +631,19 @@ func buildStorageEnv(cfg api.StorageBackendConfig) map[string]string {
 }
 
 func getResticVersion(binary string) string {
-	out, err := exec.Command(binary, "version").CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, binary, "version").CombinedOutput()
 	if err != nil {
 		return "unknown"
 	}
-	return strings.TrimSpace(string(out))
+	// Parse "restic 0.17.3 compiled with go1.21.0 on linux/amd64" → "0.17.3"
+	line := strings.TrimSpace(string(out))
+	parts := strings.Fields(line)
+	if len(parts) >= 2 && parts[0] == "restic" {
+		return parts[1]
+	}
+	return line
 }
 
 func checkForUpdates(cfg *config.AgentConfig) {

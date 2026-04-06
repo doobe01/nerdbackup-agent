@@ -1,0 +1,10 @@
+# Docker host
+/var/lib/docker/overlay2/
+/var/lib/docker/image/
+/var/lib/docker/buildkit/
+/var/lib/docker/tmp/
+/var/lib/docker/network/
+/var/lib/docker/plugins/
+/var/lib/docker/swarm/
+/var/lib/docker/runtimes/
+/var/lib/containerd/io.containerd.snapshotter.*/
