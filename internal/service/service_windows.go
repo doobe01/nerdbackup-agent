@@ -24,6 +24,7 @@ func Install(binaryPath string) error {
 	}
 
 	// Create task that runs at user login
+	// Try with HIGHEST run level first (needs admin), fall back to normal
 	err := exec.Command("schtasks", "/Create",
 		"/TN", taskName,
 		"/TR", fmt.Sprintf(`"%s" run`, binaryPath),
@@ -31,6 +32,15 @@ func Install(binaryPath string) error {
 		"/RL", "HIGHEST",
 		"/F",
 	).Run()
+	if err != nil {
+		logging.Log.Debug().Msg("HIGHEST run level failed, trying without elevation")
+		err = exec.Command("schtasks", "/Create",
+			"/TN", taskName,
+			"/TR", fmt.Sprintf(`"%s" run`, binaryPath),
+			"/SC", "ONLOGON",
+			"/F",
+		).Run()
+	}
 	if err != nil {
 		return fmt.Errorf("create scheduled task: %w", err)
 	}
