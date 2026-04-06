@@ -1,7 +1,8 @@
 version: 2
 
 builds:
-  - main: ./cmd/nerdbackup-agent
+  - id: agent
+    main: ./cmd/nerdbackup-agent
     binary: nerdbackup-agent
     env:
       - CGO_ENABLED=0
@@ -18,12 +19,33 @@ builds:
     ldflags:
       - -s -w -X main.version={{.Version}}
 
+  - id: installer
+    main: ./cmd/nerdbackup-installer
+    binary: nerdbackup-installer
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w
+
 archives:
-  - format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+  - id: agent-archives
+    builds:
+      - agent
+    format: tar.gz
+    name_template: "nerdbackup-agent_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
         format: zip
+
+  - id: installer-archive
+    builds:
+      - installer
+    format: binary
+    name_template: "nerdbackup-installer_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"

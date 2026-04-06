@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 - Zero-touch install: `--install-token` flag for `init` command — auto-registers, installs restic, installs service, starts agent
 - `RegisterWithToken` API method for pre-authenticated registration
+- Windows .exe installer (`nerdbackup-installer.exe`) with appended config — download from dashboard, double-click, done
 
 ### Fixed
 - Restic auto-installer now extracts `.bz2`/`.zip` archives instead of saving raw archive as binary
