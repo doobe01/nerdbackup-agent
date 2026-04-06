@@ -227,6 +227,6 @@ func extractMessageType(line []byte) string {
 	var partial struct {
 		MessageType string `json:"message_type"`
 	}
-	json.Unmarshal(line, &partial)
+	_ = json.Unmarshal(line, &partial)
 	return partial.MessageType
 }

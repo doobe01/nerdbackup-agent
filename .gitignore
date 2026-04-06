@@ -1,5 +1,5 @@
-# Binaries
-nerdbackup-agent
+# Binaries (leading / = root only, won't match cmd/nerdbackup-agent/)
+/nerdbackup-agent
 *.exe
 dist/
 

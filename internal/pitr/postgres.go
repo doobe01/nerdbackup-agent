@@ -28,8 +28,8 @@ func SetupPostgresWAL(cfg PITRConfig) (configLines string, archiveDir string, er
 		return "", "", fmt.Errorf("create WAL archive dir: %w", err)
 	}
 
-	// Set ownership to postgres user
-	exec.Command("chown", "postgres:postgres", archiveDir).Run()
+	// Set ownership to postgres user (best-effort)
+	_ = exec.Command("chown", "postgres:postgres", archiveDir).Run()
 
 	interval := cfg.WALArchiveInterval
 	if interval == 0 {

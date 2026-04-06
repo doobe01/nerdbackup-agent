@@ -124,7 +124,7 @@ func (s *Scheduler) autoInitRepo(ctx context.Context, repo api.RepoConfig) {
 	}
 
 	s.cfg.MarkRepoInitialized(repo.ID)
-	config.Save(s.cfg)
+	_ = config.Save(s.cfg)
 	logging.Log.Info().Str("repo", repo.ID).Msg("Repo initialized")
 }
 
@@ -220,7 +220,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 	}
 
 	// Report to API (with retry + pending persistence)
-	s.client.ReportJob(ctx, report)
+	_ = s.client.ReportJob(ctx, report)
 
 	// Run post-backup hook (runs even if backup failed)
 	snapshotID := ""
