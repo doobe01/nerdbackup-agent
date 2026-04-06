@@ -12,6 +12,9 @@ builds:
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
     ldflags:
       - -s -w -X main.version={{.Version}}
 
@@ -24,11 +27,23 @@ archives:
 
 checksum:
   name_template: "checksums.txt"
+  algorithm: sha256
 
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
+  use: github-native
+
+release:
+  header: |
+    ## NerdBackup Agent {{ .Version }}
+
+    See [CHANGELOG.md](https://github.com/doobe01/nerdbackup-agent/blob/main/CHANGELOG.md) for full details.
+
+    ### Install
+
+    ```bash
+    # Linux / macOS
+    curl -sSL https://nerdbackup.com/install.sh | sh
+
+    # Windows (PowerShell)
+    irm https://nerdbackup.com/install.ps1 | iex
+    ```

@@ -4,6 +4,34 @@ All notable changes to the NerdBackup Agent will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.1.1] - 2026-04-06
+
+### Added
+- 6 new exclude presets: `golang`, `rust`, `ruby`, `docker`, `kubernetes`, `database` (10 total)
+- Benchmarks for preset loading, config round-trip, retry logic
+- MIT LICENSE file
+- CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
+- GitHub Actions CI (test + lint + build on all platforms)
+- GitHub Actions release workflow (GoReleaser on tag push)
+- Issue templates (bug report, feature request) and PR template
+- .editorconfig for consistent formatting
+- Unit tests: config store (save/load/atomic/exists), retry logic, presets
+
+### Fixed
+- macOS: `launchctl load` replaced with modern `launchctl bootstrap` (with legacy fallback)
+- Windows: disk free space now checks home directory drive instead of hardcoded C:\
+- `getResticVersion`: properly parses version number from restic output, 5s timeout
+- All unchecked error returns fixed (golangci-lint errcheck clean)
+- `.gitignore`: no longer ignores `cmd/nerdbackup-agent/` source directory
+- Docker discovery now uploads volumes to NerdBackup API
+- `update` command description corrected to "Check for available agent updates"
+
+### Changed
+- Go dependencies downgraded for Go 1.23 compatibility (zerolog v1.33, x/sys v0.25)
+- Makefile: added `fmt`, `vet`, `coverage`, `install`, `release`, `check` targets
+
 ## [0.1.0] - 2026-04-05
 
 ### Added

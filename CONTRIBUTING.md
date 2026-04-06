@@ -28,9 +28,10 @@ make vet           # Run go vet
 1. **Fork** the repository
 2. **Create a branch** from `main`: `git checkout -b my-feature`
 3. **Make your changes** with tests
-4. **Run checks:** `make test && make lint`
-5. **Commit** with a clear message: `feat: add bandwidth throttling for restore`
-6. **Push** and open a Pull Request
+4. **Update CHANGELOG.md** — add your change under `[Unreleased]`
+5. **Run checks:** `make test && make lint`
+6. **Commit** with a clear message: `feat: add bandwidth throttling for restore`
+7. **Push** and open a Pull Request
 
 ## Commit Messages
 
