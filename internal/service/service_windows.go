@@ -9,6 +9,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
+	"github.com/doobe01/nerdbackup-agent/internal/config"
 	"github.com/doobe01/nerdbackup-agent/internal/logging"
 )
 
@@ -49,6 +50,13 @@ func Install(binaryPath string) error {
 	}, uint32(86400)) // reset failure count after 24 hours
 	if err != nil {
 		logging.Log.Warn().Err(err).Msg("Failed to set recovery actions")
+	}
+
+	// Copy config to system-wide path so LOCAL SYSTEM can read it
+	if err := config.CopyToSystemPath(); err != nil {
+		logging.Log.Warn().Err(err).Msg("Failed to copy config to system path — service may not start")
+	} else {
+		logging.Log.Info().Str("path", config.SystemConfigPath()).Msg("Config copied to system path")
 	}
 
 	logging.Log.Info().Str("service", serviceName).Msg("Windows service installed")
