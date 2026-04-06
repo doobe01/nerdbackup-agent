@@ -114,7 +114,7 @@ func initCmd() *cobra.Command {
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "NerdBackup API key (required)")
 	cmd.Flags().StringVar(&apiURL, "api-url", "https://nerdbackup.com", "NerdBackup API base URL")
 	cmd.Flags().StringVar(&name, "name", "", "Agent name (defaults to hostname)")
-	cmd.MarkFlagRequired("api-key")
+	_ = cmd.MarkFlagRequired("api-key")
 
 	return cmd
 }
@@ -132,7 +132,7 @@ func runCmd() *cobra.Command {
 			logging.Init(cfg.Debug)
 			startedAt := time.Now()
 			cfg.StartedAt = startedAt
-			config.Save(cfg)
+			_ = config.Save(cfg)
 
 			logging.Log.Info().Str("agent_id", cfg.AgentID).Str("version", version).Msg("Starting NerdBackup Agent")
 
@@ -259,7 +259,7 @@ func backupCmd() *cobra.Command {
 			if err != nil {
 				report.Status = "failed"
 				report.ErrorMessage = err.Error()
-				client.ReportJob(ctx, report)
+				_ = client.ReportJob(ctx, report)
 				return fmt.Errorf("backup failed: %w", err)
 			}
 
@@ -275,7 +275,7 @@ func backupCmd() *cobra.Command {
 				TotalBytesProcessed: summary.TotalBytesProcessed,
 				TotalDurationSec:    int(summary.TotalDuration),
 			}
-			client.ReportJob(ctx, report)
+			_ = client.ReportJob(ctx, report)
 
 			logging.Log.Info().
 				Str("snapshot", summary.SnapshotID).
@@ -428,12 +428,12 @@ func restoreCmd() *cobra.Command {
 			if err != nil {
 				report.Status = "failed"
 				report.ErrorMessage = err.Error()
-				client.ReportJob(ctx, report)
+				_ = client.ReportJob(ctx, report)
 				return fmt.Errorf("restore failed: %w", err)
 			}
 
 			report.Status = "completed"
-			client.ReportJob(ctx, report)
+			_ = client.ReportJob(ctx, report)
 
 			logging.Log.Info().Str("snapshot", snapshotID).Str("target", targetPath).Msg("Restore completed")
 			return nil

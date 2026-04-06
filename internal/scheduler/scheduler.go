@@ -113,7 +113,7 @@ func (s *Scheduler) autoInitRepo(ctx context.Context, repo api.RepoConfig) {
 
 	if runner.IsInitialized(ctx) {
 		s.cfg.MarkRepoInitialized(repo.ID)
-		config.Save(s.cfg)
+		_ = config.Save(s.cfg)
 		return
 	}
 
@@ -216,7 +216,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 
 		// Update last backup time
 		s.cfg.LastBackupAt = completedAt.Format(time.RFC3339)
-		config.Save(s.cfg)
+		_ = config.Save(s.cfg)
 	}
 
 	// Report to API (with retry + pending persistence)
