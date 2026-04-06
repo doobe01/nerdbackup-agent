@@ -60,6 +60,13 @@ type Lock struct {
 	GID       int       `json:"gid"`
 }
 
+// FileEntry represents a file in a snapshot listing.
+type FileEntry struct {
+	Path       string `json:"path"`
+	Size       int64  `json:"size"`
+	ModifiedAt string `json:"modified_at"`
+}
+
 // BackupOptions configures a backup run.
 type BackupOptions struct {
 	Paths             []string

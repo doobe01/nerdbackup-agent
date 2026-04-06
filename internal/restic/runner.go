@@ -147,6 +147,42 @@ func (r *Runner) Snapshots(ctx context.Context) ([]Snapshot, error) {
 	return snapshots, nil
 }
 
+// LsFiles lists files in a snapshot, limited to maxFiles entries.
+func (r *Runner) LsFiles(ctx context.Context, snapshotID string, maxFiles int) ([]FileEntry, error) {
+	out, err := r.run(ctx, "ls", "--json", snapshotID)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []FileEntry
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var entry struct {
+			Type       string `json:"type"`
+			Path       string `json:"path"`
+			Size       int64  `json:"size"`
+			ModifyTime string `json:"mtime"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry.Type == "file" {
+			files = append(files, FileEntry{
+				Path:       entry.Path,
+				Size:       entry.Size,
+				ModifiedAt: entry.ModifyTime,
+			})
+			if len(files) >= maxFiles {
+				break
+			}
+		}
+	}
+	return files, nil
+}
+
 // Restore restores a snapshot to a target directory.
 func (r *Runner) Restore(ctx context.Context, snapshotID string, target string, includes []string, excludes []string) error {
 	args := []string{"restore", snapshotID, "--target", target}

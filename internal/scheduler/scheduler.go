@@ -219,6 +219,15 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 		}
 		log.Info().Str("snapshot", summary.SnapshotID).Int64("added", summary.DataAdded).Msg("Backup completed")
 
+		// Capture file listing for dashboard browsing (max 500 files)
+		if files, lsErr := runner.LsFiles(ctx, summary.SnapshotID, 500); lsErr == nil && len(files) > 0 {
+			fileList := make([]map[string]interface{}, len(files))
+			for i, f := range files {
+				fileList[i] = map[string]interface{}{"path": f.Path, "size": f.Size, "modified_at": f.ModifiedAt}
+			}
+			report.Files = fileList
+		}
+
 		// Update last backup time
 		s.cfg.LastBackupAt = completedAt.Format(time.RFC3339)
 		_ = config.Save(s.cfg)

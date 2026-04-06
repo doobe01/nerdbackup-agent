@@ -76,9 +76,10 @@ type JobReportRequest struct {
 	Status           string    `json:"status"`
 	StartedAt        time.Time `json:"started_at"`
 	CompletedAt      time.Time `json:"completed_at"`
-	ResticSnapshotID string    `json:"restic_snapshot_id,omitempty"`
-	Stats            JobStats  `json:"stats"`
-	ErrorMessage     string    `json:"error_message,omitempty"`
+	ResticSnapshotID string              `json:"restic_snapshot_id,omitempty"`
+	Stats            JobStats            `json:"stats"`
+	Files            []map[string]interface{} `json:"files,omitempty"`
+	ErrorMessage     string              `json:"error_message,omitempty"`
 }
 
 type JobStats struct {
