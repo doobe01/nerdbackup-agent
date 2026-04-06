@@ -41,6 +41,7 @@ func main() {
 	root.AddCommand(doctorCmd())
 	root.AddCommand(updateCmd())
 	root.AddCommand(installServiceCmd())
+	root.AddCommand(serviceCmd())
 	root.AddCommand(dockerDiscoverCmd())
 
 	if err := root.Execute(); err != nil {
@@ -173,49 +174,116 @@ func runCmd() *cobra.Command {
 			}
 
 			logging.Init(cfg.Debug)
-			startedAt := time.Now()
-			cfg.StartedAt = startedAt
-			_ = config.Save(cfg)
-
-			logging.Log.Info().Str("agent_id", cfg.AgentID).Str("version", version).Msg("Starting NerdBackup Agent")
-
-			// Check for updates (non-blocking)
-			go checkForUpdates(cfg)
-
-			resticBinary, err := restic.FindOrInstall()
-			if err != nil {
-				return fmt.Errorf("restic not available: %w", err)
-			}
-
-			resticVersion := getResticVersion(resticBinary)
-			client := api.NewClient(cfg.APIBaseURL, cfg.AgentID, cfg.AgentToken)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// Graceful shutdown
+			// If running as a Windows Service, use the service handler
+			if service.IsWindowsService() {
+				logging.Log.Info().Msg("Running as Windows Service")
+				return service.RunAsService(
+					func() error { return runAgent(ctx, cfg) },
+					func() { cancel() },
+				)
+			}
+
+			// Interactive mode — handle signals
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-			// Start heartbeat
-			go heartbeat.Start(ctx, client, version, resticVersion, startedAt, 60*time.Second)
+			go func() {
+				<-sigCh
+				logging.Log.Info().Msg("Shutting down agent gracefully...")
+				cancel()
+			}()
 
-			// Start scheduler
-			sched := scheduler.New(client, resticBinary, cfg.AgentID, cfg, 5*time.Minute)
-			go sched.Start(ctx)
-
-			logging.Log.Info().Msg("Agent running — press Ctrl+C to stop")
-
-			<-sigCh
-			logging.Log.Info().Msg("Shutting down agent gracefully...")
-			cancel()
-
-			// Give goroutines time to finish (restic will get SIGINT via context cancellation)
-			time.Sleep(2 * time.Second)
-			logging.Log.Info().Msg("Agent stopped")
-			return nil
+			return runAgent(ctx, cfg)
 		},
 	}
+}
+
+func runAgent(ctx context.Context, cfg *config.AgentConfig) error {
+	startedAt := time.Now()
+	cfg.StartedAt = startedAt
+	_ = config.Save(cfg)
+
+	logging.Log.Info().Str("agent_id", cfg.AgentID).Str("version", version).Msg("Starting NerdBackup Agent")
+
+	go checkForUpdates(cfg)
+
+	resticBinary, err := restic.FindOrInstall()
+	if err != nil {
+		return fmt.Errorf("restic not available: %w", err)
+	}
+
+	resticVersion := getResticVersion(resticBinary)
+	client := api.NewClient(cfg.APIBaseURL, cfg.AgentID, cfg.AgentToken)
+
+	// Start heartbeat
+	go heartbeat.Start(ctx, client, version, resticVersion, startedAt, 60*time.Second)
+
+	// Start scheduler
+	sched := scheduler.New(client, resticBinary, cfg.AgentID, cfg, 5*time.Minute)
+	go sched.Start(ctx)
+
+	logging.Log.Info().Msg("Agent running")
+
+	<-ctx.Done()
+	time.Sleep(2 * time.Second)
+	logging.Log.Info().Msg("Agent stopped")
+	return nil
+}
+
+func serviceCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "service",
+		Short: "Manage the NerdBackup Agent Windows/system service",
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "install",
+		Short: "Register as a system service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logging.Init(true)
+			if !config.Exists() {
+				return fmt.Errorf("not initialized — run 'nerdbackup-agent init' first")
+			}
+			binaryPath, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("cannot determine binary path: %w", err)
+			}
+			return service.Install(binaryPath)
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove the system service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logging.Init(true)
+			return service.Uninstall()
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "start",
+		Short: "Start the system service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logging.Init(true)
+			return service.Start()
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "stop",
+		Short: "Stop the system service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logging.Init(true)
+			return service.Stop()
+		},
+	})
+
+	return cmd
 }
 
 func backupCmd() *cobra.Command {

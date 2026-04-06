@@ -91,3 +91,32 @@ func getUID() string {
 	}
 	return u.Uid
 }
+
+func Uninstall() error {
+	home, _ := os.UserHomeDir()
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+	uid := getUID()
+	domain := fmt.Sprintf("gui/%s", uid)
+	_ = exec.Command("launchctl", "bootout", domain+"/"+label).Run()
+	_ = os.Remove(plistPath)
+	fmt.Println("Service uninstalled.")
+	return nil
+}
+
+func Start() error {
+	uid := getUID()
+	domain := fmt.Sprintf("gui/%s", uid)
+	return exec.Command("launchctl", "kickstart", "-k", domain+"/"+label).Run()
+}
+
+func Stop() error {
+	uid := getUID()
+	domain := fmt.Sprintf("gui/%s", uid)
+	return exec.Command("launchctl", "kill", "SIGTERM", domain+"/"+label).Run()
+}
+
+func IsWindowsService() bool { return false }
+
+func RunAsService(_ func() error, _ func()) error {
+	return fmt.Errorf("RunAsService is only supported on Windows")
+}

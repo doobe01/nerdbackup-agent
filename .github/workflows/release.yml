@@ -11,6 +11,8 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,6 +20,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
+      - id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -25,3 +29,47 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  windows-installer:
+    needs: goreleaser
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download agent binary from release
+        run: |
+          $version = "${{ needs.goreleaser.outputs.version }}"
+          $url = "https://github.com/${{ github.repository }}/releases/download/v${version}/nerdbackup-agent_windows_amd64.zip"
+          Write-Host "Downloading $url"
+          New-Item -ItemType Directory -Force -Path installer\dist | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile agent.zip
+          Expand-Archive -Path agent.zip -DestinationPath installer\dist -Force
+        shell: pwsh
+
+      - name: Create placeholder icon
+        run: |
+          # Create a minimal valid .ico file if assets/icon.ico doesn't exist
+          if (!(Test-Path "assets\icon.ico")) {
+            New-Item -ItemType Directory -Force -Path assets | Out-Null
+            # Use the default Inno Setup icon by removing SetupIconFile reference
+            (Get-Content installer\nerdbackup.iss) -replace 'SetupIconFile=.*', '' | Set-Content installer\nerdbackup.iss
+          }
+        shell: pwsh
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+        shell: cmd
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ needs.goreleaser.outputs.version }} installer\nerdbackup.iss
+        shell: pwsh
+
+      - name: Upload installer to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ needs.goreleaser.outputs.version }}"
+          $file = "installer\Output\nerdbackup-agent-${version}-windows-setup.exe"
+          gh release upload "v${version}" "$file" --clobber
+        shell: pwsh

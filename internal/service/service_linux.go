@@ -64,3 +64,27 @@ func Install(binaryPath string) error {
 	fmt.Println("  journalctl --user -u nerdbackup-agent -f")
 	return nil
 }
+
+func Uninstall() error {
+	_ = exec.Command("systemctl", "--user", "disable", "--now", "nerdbackup-agent").Run()
+	home, _ := os.UserHomeDir()
+	unitPath := filepath.Join(home, ".config", "systemd", "user", "nerdbackup-agent.service")
+	_ = os.Remove(unitPath)
+	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+	fmt.Println("Service uninstalled.")
+	return nil
+}
+
+func Start() error {
+	return exec.Command("systemctl", "--user", "start", "nerdbackup-agent").Run()
+}
+
+func Stop() error {
+	return exec.Command("systemctl", "--user", "stop", "nerdbackup-agent").Run()
+}
+
+func IsWindowsService() bool { return false }
+
+func RunAsService(_ func() error, _ func()) error {
+	return fmt.Errorf("RunAsService is only supported on Windows")
+}

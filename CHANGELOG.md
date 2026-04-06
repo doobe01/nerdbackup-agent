@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Professional Windows installer (Inno Setup) with wizard UI, activation code page, UAC elevation
+- Proper Windows Service via `golang.org/x/sys/windows/svc` (replaces Scheduled Task)
+- `service install|uninstall|start|stop` subcommands for Windows service management
+- Service auto-restarts on failure (10s, 30s, 60s recovery actions)
+- Appears in Add/Remove Programs with clean uninstaller
+- PATH modification, Start Menu shortcuts
+- Support for silent install: `setup.exe /VERYSILENT /INSTALL_TOKEN=xxx`
+- `Uninstall()`, `Start()`, `Stop()` functions for all platforms (Linux systemd, macOS launchd, Windows service)
+
+### Removed
+- Custom Go installer binary (`cmd/nerdbackup-installer`) — replaced by Inno Setup
+- Scheduled Task service install — replaced by proper Windows Service
+
 ## [0.1.3] - 2026-04-06
 
 ### Fixed
