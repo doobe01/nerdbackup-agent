@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-06
+
+### Fixed
+- Windows installer: fix "file already closed" error when extracting zip downloads
+
 ## [0.1.2] - 2026-04-06
 
 ### Added

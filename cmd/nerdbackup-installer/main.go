@@ -171,35 +171,15 @@ func downloadAndExtract(url, destDir, targetFile string) error {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	// Download to temp file (zip needs random access)
-	tmp, err := os.CreateTemp("", "nerdbackup-dl-*.zip")
+	// Read entire zip into memory (typically <15MB)
+	zipData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		tmp.Close()
-		return err
+		return fmt.Errorf("download: %w", err)
 	}
 
-	// Seek back to start for zip reader
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		tmp.Close()
-		return err
-	}
-
-	stat, err := tmp.Stat()
+	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
-		tmp.Close()
-		return err
-	}
-
-	zr, err := zip.NewReader(tmp, stat.Size())
-	if err != nil {
-		tmp.Close()
-		return err
+		return fmt.Errorf("open zip: %w", err)
 	}
 
 	target := strings.TrimSuffix(strings.ToLower(targetFile), ".exe")
@@ -211,7 +191,6 @@ func downloadAndExtract(url, destDir, targetFile string) error {
 
 		rc, err := f.Open()
 		if err != nil {
-			tmp.Close()
 			return err
 		}
 
@@ -219,18 +198,15 @@ func downloadAndExtract(url, destDir, targetFile string) error {
 		out, err := os.Create(outPath)
 		if err != nil {
 			rc.Close()
-			tmp.Close()
 			return err
 		}
 
 		_, copyErr := io.Copy(out, rc)
 		rc.Close()
 		out.Close()
-		tmp.Close()
 		return copyErr
 	}
 
-	tmp.Close()
 	return fmt.Errorf("%s not found in zip", targetFile)
 }
 
