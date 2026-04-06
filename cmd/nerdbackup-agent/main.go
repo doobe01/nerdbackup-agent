@@ -50,6 +50,7 @@ func main() {
 
 func initCmd() *cobra.Command {
 	var apiKey string
+	var installToken string
 	var apiURL string
 	var name string
 
@@ -72,21 +73,48 @@ func initCmd() *cobra.Command {
 				name = hostname
 			}
 
-			logging.Log.Info().Str("api", apiURL).Str("name", name).Msg("Registering agent")
+			var agentID, agentToken string
 
-			result, err := api.Register(apiURL, apiKey, api.RegisterAgentRequest{
-				Name:     name,
-				Platform: runtime.GOOS,
-				Arch:     runtime.GOARCH,
-				Hostname: hostname,
-			})
-			if err != nil {
-				return fmt.Errorf("registration failed: %w", err)
+			if installToken != "" {
+				// Register using pre-authenticated install token (zero-touch flow)
+				logging.Log.Info().Str("api", apiURL).Str("name", name).Msg("Registering agent with install token")
+
+				result, err := api.RegisterWithToken(apiURL, installToken, api.RegisterAgentRequest{
+					Name:     name,
+					Platform: runtime.GOOS,
+					Arch:     runtime.GOARCH,
+					Hostname: hostname,
+				})
+				if err != nil {
+					return fmt.Errorf("registration failed: %w", err)
+				}
+				agentID = result.AgentID
+				agentToken = result.AgentToken
+				if result.APIBaseURL != "" {
+					apiURL = result.APIBaseURL
+				}
+			} else if apiKey != "" {
+				// Register using API key (manual flow)
+				logging.Log.Info().Str("api", apiURL).Str("name", name).Msg("Registering agent")
+
+				result, err := api.Register(apiURL, apiKey, api.RegisterAgentRequest{
+					Name:     name,
+					Platform: runtime.GOOS,
+					Arch:     runtime.GOARCH,
+					Hostname: hostname,
+				})
+				if err != nil {
+					return fmt.Errorf("registration failed: %w", err)
+				}
+				agentID = result.ID
+				agentToken = result.Token
+			} else {
+				return fmt.Errorf("either --api-key or --install-token is required")
 			}
 
 			cfg := &config.AgentConfig{
-				AgentID:    result.ID,
-				AgentToken: result.Token,
+				AgentID:    agentID,
+				AgentToken: agentToken,
 				APIBaseURL: apiURL,
 				Name:       name,
 			}
@@ -96,7 +124,7 @@ func initCmd() *cobra.Command {
 			}
 
 			logging.Log.Info().
-				Str("agent_id", result.ID).
+				Str("agent_id", agentID).
 				Str("config", config.ConfigPath()).
 				Msg("Agent registered successfully")
 
@@ -107,14 +135,24 @@ func initCmd() *cobra.Command {
 				logging.Log.Info().Str("restic", resticPath).Msg("Restic ready")
 			}
 
+			// Auto-install service when using install token (zero-touch flow)
+			if installToken != "" {
+				logging.Log.Info().Msg("Auto-installing as system service")
+				if err := service.Install(); err != nil {
+					logging.Log.Warn().Err(err).Msg("Failed to auto-install service — you can run 'nerdbackup-agent install-service' manually")
+				} else {
+					logging.Log.Info().Msg("Service installed and started")
+				}
+			}
+
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&apiKey, "api-key", "", "NerdBackup API key (required)")
+	cmd.Flags().StringVar(&apiKey, "api-key", "", "NerdBackup API key")
+	cmd.Flags().StringVar(&installToken, "install-token", "", "Pre-authenticated install token (from dashboard)")
 	cmd.Flags().StringVar(&apiURL, "api-url", "https://nerdbackup.com", "NerdBackup API base URL")
 	cmd.Flags().StringVar(&name, "name", "", "Agent name (defaults to hostname)")
-	_ = cmd.MarkFlagRequired("api-key")
 
 	return cmd
 }

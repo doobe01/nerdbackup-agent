@@ -57,6 +57,39 @@ func Register(baseURL, apiKey string, req RegisterAgentRequest) (*RegisterAgentR
 	return &result.Data, nil
 }
 
+// RegisterWithToken registers an agent using a pre-authenticated install token.
+func RegisterWithToken(baseURL, installToken string, req RegisterAgentRequest) (*RegisterWithTokenResponse, error) {
+	payload := map[string]string{
+		"install_token": installToken,
+		"platform":      req.Platform,
+		"arch":          req.Arch,
+		"hostname":      req.Hostname,
+	}
+	body, _ := json.Marshal(payload)
+	httpReq, err := http.NewRequest("POST", baseURL+"/api/v1/agents/register-with-token", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register agent: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 201 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("registration failed (%d): %s", resp.StatusCode, string(b))
+	}
+
+	var result ApiResponse[RegisterWithTokenResponse]
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result.Data, nil
+}
+
 // SendHeartbeat sends a heartbeat. Returns config_changed flag.
 func (c *Client) SendHeartbeat(ctx context.Context, req HeartbeatRequest) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse

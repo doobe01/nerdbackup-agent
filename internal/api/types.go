@@ -26,6 +26,12 @@ type RegisterAgentResponse struct {
 	Token string `json:"token"`
 }
 
+type RegisterWithTokenResponse struct {
+	AgentID    string `json:"agent_id"`
+	AgentToken string `json:"agent_token"`
+	APIBaseURL string `json:"api_base_url"`
+}
+
 // Heartbeat
 type HeartbeatRequest struct {
 	AgentVersion  string `json:"agent_version"`

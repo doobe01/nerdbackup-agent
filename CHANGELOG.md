@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Zero-touch install: `--install-token` flag for `init` command — auto-registers, installs restic, installs service, starts agent
+- `RegisterWithToken` API method for pre-authenticated registration
+
 ### Fixed
 - Restic auto-installer now extracts `.bz2`/`.zip` archives instead of saving raw archive as binary
 - Windows: install restic as `restic.exe` (was missing `.exe` extension)
