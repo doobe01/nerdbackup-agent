@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -35,10 +36,12 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Fatal("Config file was not created")
 	}
 
-	// Verify file permissions
-	info, _ := os.Stat(path)
-	if info.Mode().Perm() != 0600 {
-		t.Errorf("Expected permissions 0600, got %o", info.Mode().Perm())
+	// Verify file permissions (skip on Windows — no POSIX permissions)
+	if runtime.GOOS != "windows" {
+		info, _ := os.Stat(path)
+		if info.Mode().Perm() != 0600 {
+			t.Errorf("Expected permissions 0600, got %o", info.Mode().Perm())
+		}
 	}
 
 	// Load

@@ -6,13 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  GOTOOLCHAIN: auto
+
 jobs:
   test:
-    name: Test
+    name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -25,6 +29,16 @@ jobs:
           file: coverage.txt
         continue-on-error: true
 
+  test-windows:
+    name: Test (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - run: go test -v ./...
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -36,14 +50,25 @@ jobs:
       - uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          args: --timeout=5m
 
   build:
-    name: Build
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -53,4 +78,5 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -o nerdbackup-agent${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/nerdbackup-agent
+          CGO_ENABLED: '0'
+        run: go build -ldflags "-s -w" -o nerdbackup-agent ./cmd/nerdbackup-agent
