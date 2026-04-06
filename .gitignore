@@ -3,7 +3,12 @@ nerdbackup-agent
 *.exe
 dist/
 
-# Config
+# Test artifacts
+coverage.txt
+*.test
+*.prof
+
+# Config (contains secrets)
 .nerdbackup/
 config.json
 
@@ -11,6 +16,8 @@ config.json
 .idea/
 .vscode/
 *.swp
+*.swo
+*~
 
 # OS
 .DS_Store
