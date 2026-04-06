@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-04-06
+
+### Added
+- File listing captured after each backup (restic ls, max 500 files) and included in job report
+- Dashboard can now browse snapshot contents for new backups
+- `LsFiles()` method on restic runner
+
 ## [0.2.6] - 2026-04-06
 
 ### Added
