@@ -101,6 +101,9 @@ func (s *Scheduler) syncAndSchedule(ctx context.Context) {
 	}
 
 	s.lastRepos = repos
+
+	// Check for pending restores from the dashboard
+	s.checkPendingRestores(ctx, repos)
 }
 
 func (s *Scheduler) autoInitRepo(ctx context.Context, repo api.RepoConfig) {
@@ -241,6 +244,68 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 			log.Error().Err(checkErr).Msg("Health check failed")
 		} else {
 			log.Info().Msg("Health check passed")
+		}
+	}
+}
+
+func (s *Scheduler) checkPendingRestores(ctx context.Context, repos []api.RepoConfig) {
+	restores, err := s.client.GetPendingRestores(ctx)
+	if err != nil {
+		logging.Log.Debug().Err(err).Msg("Failed to check pending restores")
+		return
+	}
+
+	if len(restores) == 0 {
+		return
+	}
+
+	logging.Log.Info().Int("count", len(restores)).Msg("Processing pending restores")
+
+	for _, restore := range restores {
+		// Find the repo that has this snapshot
+		var targetRepo *api.RepoConfig
+		for i := range repos {
+			targetRepo = &repos[i]
+			break // Use first repo for now — snapshots are per-repo
+		}
+
+		if targetRepo == nil {
+			logging.Log.Error().Str("snapshot", restore.SnapshotID).Msg("No repo available for restore")
+			continue
+		}
+
+		// Build restic runner for this repo
+		runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
+
+		logging.Log.Info().
+			Str("snapshot", restore.SnapshotID).
+			Str("target", restore.TargetPath).
+			Strs("include", restore.IncludePaths).
+			Msg("Starting restore")
+
+		err := runner.Restore(ctx, restore.SnapshotID, restore.TargetPath, restore.IncludePaths, restore.ExcludePaths)
+		if err != nil {
+			logging.Log.Error().Err(err).Str("snapshot", restore.SnapshotID).Msg("Restore failed")
+			// Report failure
+			_ = s.client.ReportJob(ctx, api.JobReportRequest{
+				RepoID:    targetRepo.ID,
+				Operation: "restore",
+				Status:    "failed",
+				StartedAt: time.Now(),
+				CompletedAt: time.Now(),
+				ResticSnapshotID: restore.SnapshotID,
+				ErrorMessage: err.Error(),
+			})
+		} else {
+			logging.Log.Info().Str("snapshot", restore.SnapshotID).Str("target", restore.TargetPath).Msg("Restore completed")
+			_ = s.client.ReportJob(ctx, api.JobReportRequest{
+				RepoID:    targetRepo.ID,
+				Operation: "restore",
+				Status:    "completed",
+				StartedAt: time.Now(),
+				CompletedAt: time.Now(),
+				ResticSnapshotID: restore.SnapshotID,
+			})
 		}
 	}
 }

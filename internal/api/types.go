@@ -32,6 +32,16 @@ type RegisterWithTokenResponse struct {
 	APIBaseURL string `json:"api_base_url"`
 }
 
+// Pending restore request from dashboard
+type PendingRestore struct {
+	JobID        string   `json:"jobId"`
+	SnapshotID   string   `json:"snapshotId"`
+	TargetPath   string   `json:"targetPath"`
+	IncludePaths []string `json:"includePaths"`
+	ExcludePaths []string `json:"excludePaths"`
+	CreatedAt    string   `json:"createdAt"`
+}
+
 // Heartbeat
 type HeartbeatRequest struct {
 	AgentVersion  string `json:"agent_version"`

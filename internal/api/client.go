@@ -111,6 +111,31 @@ func (c *Client) Deregister(ctx context.Context) error {
 	return nil
 }
 
+// GetPendingRestores fetches any restore requests queued from the dashboard.
+func (c *Client) GetPendingRestores(ctx context.Context) ([]PendingRestore, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+fmt.Sprintf("/api/v1/agents/%s/pending-restores", c.agentID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.agentToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("pending-restores: HTTP %d", resp.StatusCode)
+	}
+
+	var result ApiResponse[[]PendingRestore]
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
 // SendHeartbeat sends a heartbeat. Returns config_changed flag.
 func (c *Client) SendHeartbeat(ctx context.Context, req HeartbeatRequest) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
