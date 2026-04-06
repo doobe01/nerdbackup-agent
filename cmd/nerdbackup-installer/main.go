@@ -176,9 +176,16 @@ func downloadAndExtract(url, destDir, targetFile string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
 
 	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		tmp.Close()
+		return err
+	}
+
+	// Seek back to start for zip reader
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -190,22 +197,21 @@ func downloadAndExtract(url, destDir, targetFile string) error {
 	}
 
 	zr, err := zip.NewReader(tmp, stat.Size())
-	tmp.Close()
 	if err != nil {
+		tmp.Close()
 		return err
 	}
 
+	target := strings.TrimSuffix(strings.ToLower(targetFile), ".exe")
 	for _, f := range zr.File {
-		name := filepath.Base(f.Name)
-		if !strings.Contains(strings.ToLower(name), strings.TrimSuffix(targetFile, ".exe")) {
-			continue
-		}
-		if f.FileInfo().IsDir() {
+		name := strings.ToLower(filepath.Base(f.Name))
+		if !strings.Contains(name, target) || f.FileInfo().IsDir() {
 			continue
 		}
 
 		rc, err := f.Open()
 		if err != nil {
+			tmp.Close()
 			return err
 		}
 
@@ -213,15 +219,18 @@ func downloadAndExtract(url, destDir, targetFile string) error {
 		out, err := os.Create(outPath)
 		if err != nil {
 			rc.Close()
+			tmp.Close()
 			return err
 		}
 
-		_, err = io.Copy(out, rc)
+		_, copyErr := io.Copy(out, rc)
 		rc.Close()
 		out.Close()
-		return err
+		tmp.Close()
+		return copyErr
 	}
 
+	tmp.Close()
 	return fmt.Errorf("%s not found in zip", targetFile)
 }
 
