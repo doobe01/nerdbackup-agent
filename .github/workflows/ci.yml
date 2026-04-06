@@ -19,10 +19,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-      - name: Test
-        env:
-          GOTOOLCHAIN: auto
-        run: go test -v -race -coverprofile=coverage.txt ./...
+      - run: go test -v -race -coverprofile=coverage.txt ./...
       - uses: codecov/codecov-action@v4
         if: matrix.os == 'ubuntu-latest'
         with:
@@ -37,26 +34,21 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-      - name: Test
-        env:
-          GOTOOLCHAIN: auto
-        run: go test -v ./...
+      - run: go test -v ./...
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-      - name: Lint
-        env:
-          GOTOOLCHAIN: auto
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          golangci-lint run --timeout=5m ./...
-        continue-on-error: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62.2
+          args: --timeout=5m
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
@@ -85,5 +77,4 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
-          GOTOOLCHAIN: auto
         run: go build -ldflags "-s -w" -o nerdbackup-agent ./cmd/nerdbackup-agent
