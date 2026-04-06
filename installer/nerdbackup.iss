@@ -68,11 +68,8 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "service start"; \
   StatusMsg: "Starting NerdBackup Agent..."; Flags: runhidden waituntilterminated
 
 [UninstallRun]
-; Stop service before uninstall
-Filename: "{app}\{#MyAppExeName}"; Parameters: "service stop"; \
-  Flags: runhidden waituntilterminated
-; Remove service
-Filename: "{app}\{#MyAppExeName}"; Parameters: "service uninstall"; \
+; Deregister from API, stop service, remove service, clean up config
+Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; \
   Flags: runhidden waituntilterminated
 
 [UninstallDelete]

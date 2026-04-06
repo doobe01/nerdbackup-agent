@@ -40,6 +40,7 @@ func main() {
 	root.AddCommand(snapshotsCmd())
 	root.AddCommand(doctorCmd())
 	root.AddCommand(updateCmd())
+	root.AddCommand(uninstallCmd())
 	root.AddCommand(installServiceCmd())
 	root.AddCommand(serviceCmd())
 	root.AddCommand(dockerDiscoverCmd())
@@ -638,6 +639,52 @@ func updateCmd() *cobra.Command {
 				fmt.Printf("  %s: %s\n", platform, url)
 			}
 			fmt.Println("\nOr run: curl -sSL https://nerdbackup.com/install.sh | sh")
+			return nil
+		},
+	}
+}
+
+func uninstallCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "uninstall",
+		Short: "Deregister from NerdBackup, stop service, and clean up",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logging.Init(true)
+
+			cfg, err := config.Load()
+			if err != nil {
+				logging.Log.Warn().Msg("No config found — skipping API deregistration")
+			} else {
+				// Deregister from the NerdBackup API
+				client := api.NewClient(cfg.APIBaseURL, cfg.AgentID, cfg.AgentToken)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				logging.Log.Info().Str("agent_id", cfg.AgentID).Msg("Deregistering agent from NerdBackup")
+				if err := client.Deregister(ctx); err != nil {
+					logging.Log.Warn().Err(err).Msg("Failed to deregister from API — agent may still appear in dashboard")
+				} else {
+					logging.Log.Info().Msg("Agent deregistered from NerdBackup")
+				}
+			}
+
+			// Stop and remove service
+			logging.Log.Info().Msg("Stopping service")
+			_ = service.Stop()
+			logging.Log.Info().Msg("Removing service")
+			_ = service.Uninstall()
+
+			// Remove config files
+			userConfig := config.UserConfigPath()
+			sysConfig := config.SystemConfigPath()
+			if err := os.Remove(userConfig); err == nil {
+				logging.Log.Info().Str("path", userConfig).Msg("Removed user config")
+			}
+			if err := os.Remove(sysConfig); err == nil {
+				logging.Log.Info().Str("path", sysConfig).Msg("Removed system config")
+			}
+
+			fmt.Println("NerdBackup Agent uninstalled.")
 			return nil
 		},
 	}

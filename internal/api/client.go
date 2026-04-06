@@ -90,6 +90,27 @@ func RegisterWithToken(baseURL, installToken string, req RegisterAgentRequest) (
 	return &result.Data, nil
 }
 
+// Deregister deletes this agent from the NerdBackup API.
+func (c *Client) Deregister(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/api/v1/agents/"+c.agentID, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.agentToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("deregister failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 204 && resp.StatusCode != 200 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("deregister failed (%d): %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
 // SendHeartbeat sends a heartbeat. Returns config_changed flag.
 func (c *Client) SendHeartbeat(ctx context.Context, req HeartbeatRequest) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- `uninstall` command — deregisters from NerdBackup API, stops service, removes service, cleans up config
+- Inno Setup uninstaller now calls `uninstall` to fully clean up (agent disappears from dashboard)
+
 ## [0.2.2] - 2026-04-06
 
 ### Fixed
