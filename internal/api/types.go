@@ -32,6 +32,13 @@ type RegisterWithTokenResponse struct {
 	APIBaseURL string `json:"api_base_url"`
 }
 
+// Pending backup trigger from dashboard
+type PendingBackup struct {
+	JobID     string `json:"jobId"`
+	RepoID    string `json:"repoId"`
+	CreatedAt string `json:"createdAt"`
+}
+
 // Pending restore request from dashboard
 type PendingRestore struct {
 	JobID        string   `json:"jobId"`

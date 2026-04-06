@@ -70,40 +70,42 @@ func (s *Scheduler) syncAndSchedule(ctx context.Context) {
 		return
 	}
 
-	if !changed {
-		logging.Log.Debug().Msg("Config unchanged (304)")
-		return
-	}
+	if changed {
+		logging.Log.Info().Int("repos", len(repos)).Msg("Config synced, rebuilding schedules")
 
-	logging.Log.Info().Int("repos", len(repos)).Msg("Config synced, rebuilding schedules")
-
-	// Auto-initialize new repos
-	for _, repo := range repos {
-		s.autoInitRepo(ctx, repo)
-	}
-
-	// Rebuild cron entries
-	for _, entry := range s.cron.Entries() {
-		s.cron.Remove(entry.ID)
-	}
-
-	for _, repo := range repos {
-		if repo.ScheduleCron == "" {
-			continue
+		// Auto-initialize new repos
+		for _, repo := range repos {
+			s.autoInitRepo(ctx, repo)
 		}
-		r := repo // capture
-		_, err := s.cron.AddFunc(r.ScheduleCron, func() {
-			s.runBackup(ctx, r)
-		})
-		if err != nil {
-			logging.Log.Error().Err(err).Str("repo", r.ID).Str("cron", r.ScheduleCron).Msg("Invalid cron expression")
+
+		// Rebuild cron entries
+		for _, entry := range s.cron.Entries() {
+			s.cron.Remove(entry.ID)
 		}
+
+		for _, repo := range repos {
+			if repo.ScheduleCron == "" {
+				continue
+			}
+			r := repo // capture
+			_, err := s.cron.AddFunc(r.ScheduleCron, func() {
+				s.runBackup(ctx, r)
+			})
+			if err != nil {
+				logging.Log.Error().Err(err).Str("repo", r.ID).Str("cron", r.ScheduleCron).Msg("Invalid cron expression")
+			}
+		}
+
+		s.lastRepos = repos
 	}
 
-	s.lastRepos = repos
-
-	// Check for pending restores from the dashboard
-	s.checkPendingRestores(ctx, repos)
+	// Always check for pending actions from the dashboard (regardless of config changes)
+	activeRepos := s.lastRepos
+	if len(activeRepos) == 0 {
+		activeRepos = repos
+	}
+	s.checkPendingRestores(ctx, activeRepos)
+	s.checkPendingBackups(ctx, activeRepos)
 }
 
 func (s *Scheduler) autoInitRepo(ctx context.Context, repo api.RepoConfig) {
@@ -307,6 +309,44 @@ func (s *Scheduler) checkPendingRestores(ctx context.Context, repos []api.RepoCo
 				ResticSnapshotID: restore.SnapshotID,
 			})
 		}
+	}
+}
+
+func (s *Scheduler) checkPendingBackups(ctx context.Context, repos []api.RepoConfig) {
+	backups, err := s.client.GetPendingBackups(ctx)
+	if err != nil {
+		logging.Log.Debug().Err(err).Msg("Failed to check pending backups")
+		return
+	}
+
+	if len(backups) == 0 {
+		return
+	}
+
+	logging.Log.Info().Int("count", len(backups)).Msg("Processing pending backup triggers")
+
+	for _, backup := range backups {
+		// Find the matching repo
+		var targetRepo *api.RepoConfig
+		for i := range repos {
+			if repos[i].ID == backup.RepoID {
+				targetRepo = &repos[i]
+				break
+			}
+		}
+
+		// If no specific repo found, use first repo
+		if targetRepo == nil && len(repos) > 0 {
+			targetRepo = &repos[0]
+		}
+
+		if targetRepo == nil {
+			logging.Log.Error().Str("repoId", backup.RepoID).Msg("No repo available for triggered backup")
+			continue
+		}
+
+		logging.Log.Info().Str("repo", targetRepo.ID).Msg("Running dashboard-triggered backup")
+		s.runBackup(ctx, *targetRepo)
 	}
 }
 
