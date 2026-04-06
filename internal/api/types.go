@@ -72,6 +72,7 @@ type HeartbeatResponse struct {
 type JobReportRequest struct {
 	RepoID           string    `json:"repo_id"`
 	PolicyID         string    `json:"policy_id,omitempty"`
+	DashboardJobID   string    `json:"dashboard_job_id,omitempty"`
 	Operation        string    `json:"operation"`
 	Status           string    `json:"status"`
 	StartedAt        time.Time `json:"started_at"`

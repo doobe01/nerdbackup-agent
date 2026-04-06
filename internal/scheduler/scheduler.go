@@ -133,7 +133,7 @@ func (s *Scheduler) autoInitRepo(ctx context.Context, repo api.RepoConfig) {
 	logging.Log.Info().Str("repo", repo.ID).Msg("Repo initialized")
 }
 
-func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
+func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboardJobID ...string) {
 	log := logging.Log.With().Str("repo", repo.ID).Logger()
 	log.Info().Strs("paths", repo.Paths).Msg("Starting scheduled backup")
 
@@ -192,12 +192,18 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig) {
 	completedAt := time.Now()
 
 	// Build job report
+	djID := ""
+	if len(dashboardJobID) > 0 {
+		djID = dashboardJobID[0]
+	}
+
 	report := api.JobReportRequest{
-		RepoID:      repo.ID,
-		PolicyID:    repo.PolicyID,
-		Operation:   "backup",
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
+		RepoID:         repo.ID,
+		PolicyID:       repo.PolicyID,
+		DashboardJobID: djID,
+		Operation:      "backup",
+		StartedAt:      startedAt,
+		CompletedAt:    completedAt,
 	}
 
 	if err != nil {
@@ -354,8 +360,8 @@ func (s *Scheduler) checkPendingBackups(ctx context.Context, repos []api.RepoCon
 			continue
 		}
 
-		logging.Log.Info().Str("repo", targetRepo.ID).Msg("Running dashboard-triggered backup")
-		s.runBackup(ctx, *targetRepo)
+		logging.Log.Info().Str("repo", targetRepo.ID).Str("jobId", backup.JobID).Msg("Running dashboard-triggered backup")
+		s.runBackup(ctx, *targetRepo, backup.JobID)
 	}
 }
 
