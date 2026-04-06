@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-06
+
+### Fixed
+- Windows Service: copy config to `%PROGRAMDATA%\NerdBackup\` during service install so LOCAL SYSTEM can read it
+- Config store checks system-wide path first on Windows (fallback to user home)
+
 ## [0.2.0] - 2026-04-06
 
 ### Added
