@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-04-06
+
+### Added
+- Local file logging: writes to `C:\ProgramData\NerdBackup\agent.log` (Windows) or `~/.nerdbackup/agent.log` (Linux/macOS)
+- Logs to both console and file simultaneously
+- Auto-truncates log file at 10MB
+
 ## [0.2.5] - 2026-04-06
 
 ### Fixed
