@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-04-06
+
+### Fixed
+- Pending restores and backups now checked on EVERY sync tick (not only when config changes)
+- Dashboard "Run" button now triggers agent backups via Redis queue
+
+### Added
+- `checkPendingBackups()` — agent polls for dashboard-triggered backup requests
+- `GetPendingBackups()` API method + `PendingBackup` type
+
 ## [0.2.4] - 2026-04-06
 
 ### Added
