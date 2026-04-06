@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-04-06
+
+### Added
+- One-click restore from dashboard — agent polls for pending restore requests
+- `GetPendingRestores()` API method
+- Scheduler checks for pending restores on each config sync
+- Executes `restic restore` and reports completion/failure back to server
+
 ## [0.2.3] - 2026-04-06
 
 ### Added
