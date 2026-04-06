@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-06
+
 ### Added
 - Professional Windows installer (Inno Setup) with wizard UI, activation code page, UAC elevation
 - Proper Windows Service via `golang.org/x/sys/windows/svc` (replaces Scheduled Task)
