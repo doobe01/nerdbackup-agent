@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -49,9 +50,8 @@ func Init(debug bool) {
 
 	logPath := LogFilePath()
 	logDir := filepath.Dir(logPath)
-	_ = os.MkdirAll(logDir, 0777) // 0777 so Windows SYSTEM account can write
+	_ = os.MkdirAll(logDir, 0777)
 
-	// On Windows, explicitly grant SYSTEM write access to the log directory
 	if runtime.GOOS == "windows" {
 		_ = grantSystemAccess(logDir)
 	}
@@ -61,7 +61,32 @@ func Init(debug bool) {
 		_ = os.Rename(logPath, logPath+".old")
 	}
 
-	logFile, fileErr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666) // 0666 for service access
+	logFile, fileErr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+
+	// If primary log fails, try fallback locations
+	if fileErr != nil && runtime.GOOS == "windows" {
+		// Write diagnostic so we know WHY it failed
+		diagPath := filepath.Join(os.TempDir(), "nerdbackup-log-error.txt")
+		_ = os.WriteFile(diagPath, []byte(fmt.Sprintf("Primary log failed: %v\nPath: %s\n", fileErr, logPath)), 0666)
+
+		// Try fallback: next to the binary
+		if selfPath, err := os.Executable(); err == nil {
+			fallback := filepath.Join(filepath.Dir(selfPath), "agent.log")
+			logFile, fileErr = os.OpenFile(fallback, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+			if fileErr == nil {
+				logPath = fallback
+			}
+		}
+
+		// Try fallback: Windows temp dir
+		if fileErr != nil {
+			fallback := filepath.Join(os.TempDir(), "nerdbackup-agent.log")
+			logFile, fileErr = os.OpenFile(fallback, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+			if fileErr == nil {
+				logPath = fallback
+			}
+		}
+	}
 
 	var writers []io.Writer
 

@@ -170,6 +170,12 @@ func runCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Start the agent (heartbeat + scheduler)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Write startup marker so we can diagnose service issues
+			if service.IsWindowsService() {
+				marker := fmt.Sprintf("Service started at %s, PID %d\n", time.Now().Format(time.RFC3339), os.Getpid())
+				_ = os.WriteFile(`C:\ProgramData\NerdBackup\service-start.txt`, []byte(marker), 0666)
+			}
+
 			// Initialize logging FIRST so any errors are captured in the log file
 			// (critical for Windows Service where stderr goes nowhere)
 			logging.Init(false)
