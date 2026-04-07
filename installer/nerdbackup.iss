@@ -143,40 +143,6 @@ begin
   end;
 end;
 
-// ── Pre-Uninstall: stop service, remove service, deregister, kill process ──
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  ResultCode: Integer;
-begin
-  if CurUninstallStep = usUninstall then
-  begin
-    // 1. Stop the service via sc.exe (not the agent binary — it's about to be deleted)
-    Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#ServiceName}',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Sleep(3000);
-
-    // 2. Delete the service registration
-    Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServiceName}',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Sleep(2000);
-
-    // 3. Kill any remaining agent process (so files can be deleted)
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#MyAppExeName}',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Sleep(1000);
-
-    // 4. Deregister from NerdBackup API (best effort — uses agent binary before deletion)
-    Exec(ExpandConstant('{app}\{#MyAppExeName}'), 'uninstall',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
-
-  // Remove from PATH on uninstall
-  if CurUninstallStep = usPostUninstall then
-  begin
-    RemoveFromPath(ExpandConstant('{app}'));
-  end;
-end;
-
 procedure RemoveFromPath(AppDir: string);
 var
   OrigPath: string;
@@ -191,5 +157,38 @@ begin
     RegWriteStringValue(HKEY_LOCAL_MACHINE,
       'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
       'Path', OrigPath);
+  end;
+end;
+
+// ── Pre-Uninstall: stop service, remove service, deregister, kill process ──
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // 1. Stop the service via sc.exe
+    Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#ServiceName}',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(3000);
+
+    // 2. Delete the service registration
+    Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServiceName}',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(2000);
+
+    // 3. Kill any remaining agent process (so files can be deleted)
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#MyAppExeName}',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(1000);
+
+    // 4. Deregister from NerdBackup API (best effort)
+    Exec(ExpandConstant('{app}\{#MyAppExeName}'), 'uninstall',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
+  if CurUninstallStep = usPostUninstall then
+  begin
+    RemoveFromPath(ExpandConstant('{app}'));
   end;
 end;
