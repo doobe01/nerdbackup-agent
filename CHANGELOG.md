@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-04-07
+
+### Fixed
+- WebSocket client: only dispatch messages with `type: "command"` — ignore heartbeat_ack, job_report_ack
+- No more "Unknown command action" warnings in logs
+
 ## [0.5.0] - 2026-04-07
 
 ### Added
