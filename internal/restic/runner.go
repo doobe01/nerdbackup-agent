@@ -225,6 +225,18 @@ func (r *Runner) Forget(ctx context.Context, keepLast, keepDaily, keepWeekly, ke
 	return err
 }
 
+// ForgetSnapshot removes a specific snapshot by ID without pruning.
+func (r *Runner) ForgetSnapshot(ctx context.Context, snapshotID string) error {
+	_, err := r.run(ctx, "forget", snapshotID)
+	return err
+}
+
+// Prune removes unreferenced data from the repository.
+func (r *Runner) Prune(ctx context.Context) error {
+	_, err := r.run(ctx, "prune")
+	return err
+}
+
 // Check verifies the repository integrity.
 func (r *Runner) Check(ctx context.Context) error {
 	_, err := r.run(ctx, "check")

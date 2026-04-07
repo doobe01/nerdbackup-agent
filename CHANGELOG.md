@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- Replaced `autoInitRepo` with `ensureRepoReady` — always verifies repo accessibility before backup (never trusts local state), clears stale locks first, and verifies init succeeded
+- `runBackup` now calls `ensureRepoReady` before every backup with proper error handling and dashboard status reporting on failure
+- `syncAndSchedule` uses `ensureRepoReady` for each repo during config sync (logs and continues if one fails)
+- `HandleCommand("start_backup")` uses `ensureRepoReady` with error handling — reports failure to dashboard if repo is not ready
+
+### Added
+- `ForgetSnapshot` method on restic Runner: removes a specific snapshot by ID without pruning
+- `Prune` method on restic Runner: removes unreferenced data from the repository
+- `forget_snapshot` command handler in scheduler: forgets a specific snapshot, prunes unreferenced data, and reports completion via WebSocket
+- Repo unlock after cancel: when a backup is cancelled, the agent now unlocks the restic repo to prevent stale locks from blocking future backups
+
+### Removed
+- `autoInitRepo` function (replaced by `ensureRepoReady` with proper error handling and verification)
+
 ## [0.5.5] - 2026-04-07
 
 ### Added

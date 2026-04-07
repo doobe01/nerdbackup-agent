@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -105,8 +106,17 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 			}
 
 			ctx := context.Background()
-			// Auto-init repo if needed (first backup after policy creation)
-			s.autoInitRepo(ctx, *targetRepo)
+			// Ensure repo is ready (init if needed, clear stale locks)
+			if err := s.ensureRepoReady(ctx, *targetRepo); err != nil {
+				log.Error().Err(err).Msg("Repo not ready — cannot start backup")
+				if data.JobID != "" && s.wsClient != nil {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "job_started",
+						Data: map[string]string{"job_id": data.JobID, "status": "failed"},
+					})
+				}
+				return
+			}
 			s.runBackup(ctx, *targetRepo, data.JobID)
 		}()
 
@@ -200,6 +210,63 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 			log.Warn().Msg("No paused backup to resume")
 		}
 
+	case "forget_snapshot":
+		var data struct {
+			SnapshotID string `json:"snapshot_id"`
+			RepoID     string `json:"repo_id"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &data)
+		}
+
+		go func() {
+			repos := s.lastRepos
+			var targetRepo *api.RepoConfig
+			for i := range repos {
+				if repos[i].ID == data.RepoID {
+					targetRepo = &repos[i]
+					break
+				}
+			}
+			if targetRepo == nil && len(repos) > 0 {
+				targetRepo = &repos[0]
+			}
+			if targetRepo == nil {
+				log.Warn().Msg("No repo for forget_snapshot command")
+				return
+			}
+
+			runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
+			ctx := context.Background()
+
+			// Forget the specific snapshot
+			if data.SnapshotID != "" {
+				if err := runner.ForgetSnapshot(ctx, data.SnapshotID); err != nil {
+					log.Error().Err(err).Str("snapshot", data.SnapshotID).Msg("restic forget failed")
+					return
+				}
+				log.Info().Str("snapshot", data.SnapshotID).Msg("Snapshot forgotten")
+			}
+
+			// Prune unreferenced data
+			if err := runner.Prune(ctx); err != nil {
+				log.Error().Err(err).Msg("restic prune failed")
+			} else {
+				log.Info().Msg("Prune completed — storage reclaimed")
+			}
+
+			// Report back to server
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.Send(ws.Message{
+					Type: "forget_completed",
+					Data: map[string]string{
+						"snapshot_id": data.SnapshotID,
+						"repo_id":    data.RepoID,
+					},
+				})
+			}
+		}()
+
 	case "config_update":
 		// Force an immediate config re-sync
 		log.Info().Msg("Config update command received, triggering re-sync")
@@ -246,9 +313,11 @@ func (s *Scheduler) syncAndSchedule(ctx context.Context) {
 	if changed {
 		logging.Log.Info().Int("repos", len(repos)).Msg("Config synced, rebuilding schedules")
 
-		// Auto-initialize new repos
+		// Ensure all repos are ready (init if needed, clear stale locks)
 		for _, repo := range repos {
-			s.autoInitRepo(ctx, repo)
+			if err := s.ensureRepoReady(ctx, repo); err != nil {
+				logging.Log.Warn().Err(err).Str("repo", repo.ID).Msg("Repo not ready during sync — will retry before backup")
+			}
 		}
 
 		// Rebuild cron entries
@@ -285,29 +354,33 @@ func (s *Scheduler) syncAndSchedule(ctx context.Context) {
 	}
 }
 
-func (s *Scheduler) autoInitRepo(ctx context.Context, repo api.RepoConfig) {
-	if s.cfg.IsRepoInitialized(repo.ID) {
-		return
-	}
-
+// ensureRepoReady verifies the restic repo exists and is accessible.
+// If not, it initializes it. Called before every backup — never trust local state.
+func (s *Scheduler) ensureRepoReady(ctx context.Context, repo api.RepoConfig) error {
 	storageEnv := buildStorageEnv(repo.StorageConfig)
 	runner := restic.NewRunner(s.resticBinary, repo.ResticRepoPath, repo.ResticPassword, storageEnv)
 
+	// Always clear stale locks first
+	_ = runner.UnlockIfStale(ctx, 0) // force unlock — we're about to use this repo
+
+	// Verify repo exists by running `restic snapshots` (fast, <1s)
 	if runner.IsInitialized(ctx) {
-		s.cfg.MarkRepoInitialized(repo.ID)
-		_ = config.Save(s.cfg)
-		return
+		return nil
 	}
 
-	logging.Log.Info().Str("repo", repo.ID).Msg("Initializing new restic repo")
+	// Repo not accessible — init it
+	logging.Log.Info().Str("repo", repo.ID).Msg("Initializing restic repo")
 	if err := runner.Init(ctx); err != nil {
-		logging.Log.Error().Err(err).Str("repo", repo.ID).Msg("Failed to init repo")
-		return
+		return fmt.Errorf("restic init failed: %w", err)
 	}
 
-	s.cfg.MarkRepoInitialized(repo.ID)
-	_ = config.Save(s.cfg)
-	logging.Log.Info().Str("repo", repo.ID).Msg("Repo initialized")
+	// Verify init succeeded
+	if !runner.IsInitialized(ctx) {
+		return fmt.Errorf("restic init completed but repo still not accessible")
+	}
+
+	logging.Log.Info().Str("repo", repo.ID).Msg("Repo initialized and verified")
+	return nil
 }
 
 func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboardJobID ...string) {
@@ -347,6 +420,18 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 		})
 	}
 
+	// Ensure repo is ready before backup
+	if err := s.ensureRepoReady(backupCtx, repo); err != nil {
+		log.Error().Err(err).Msg("Repo not ready — cannot start backup")
+		if djID != "" && s.wsClient != nil {
+			_ = s.wsClient.Send(ws.Message{
+				Type: "job_started",
+				Data: map[string]string{"job_id": djID, "status": "failed"},
+			})
+		}
+		return
+	}
+
 	// Run pre-backup hook
 	if err := runPreHook(backupCtx, repo.PreBackupCommand); err != nil {
 		log.Error().Err(err).Msg("Pre-backup hook failed — skipping backup")
@@ -356,11 +441,6 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 	startedAt := time.Now()
 	storageEnv := buildStorageEnv(repo.StorageConfig)
 	runner := restic.NewRunner(s.resticBinary, repo.ResticRepoPath, repo.ResticPassword, storageEnv)
-
-	// Remove stale locks before backup
-	if err := runner.UnlockIfStale(backupCtx, 30*time.Minute); err != nil {
-		log.Warn().Err(err).Msg("Stale lock removal failed")
-	}
 
 	// Merge preset + custom exclude patterns
 	excludes := restic.MergeExcludes(repo.ExcludePresets, repo.ExcludePatterns)
@@ -418,6 +498,16 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 	})
 
 	completedAt := time.Now()
+
+	// If cancelled, unlock the repo (restic leaves a lock when killed)
+	if backupCtx.Err() == context.Canceled {
+		unlockRunner := restic.NewRunner(s.resticBinary, repo.ResticRepoPath, repo.ResticPassword, buildStorageEnv(repo.StorageConfig))
+		if unlockErr := unlockRunner.UnlockIfStale(context.Background(), 0); unlockErr != nil {
+			log.Warn().Err(unlockErr).Msg("Failed to unlock repo after cancel")
+		} else {
+			log.Info().Msg("Repo unlocked after cancel")
+		}
+	}
 
 	// Build job report (djID already set at function start)
 
