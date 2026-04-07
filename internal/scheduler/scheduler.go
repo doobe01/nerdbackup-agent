@@ -272,14 +272,17 @@ func (s *Scheduler) syncAndSchedule(ctx context.Context) {
 		s.lastRepos = repos
 	}
 
-	// Always check for pending actions from the dashboard (regardless of config changes)
-	activeRepos := s.lastRepos
-	if len(activeRepos) == 0 {
-		activeRepos = repos
+	// Only check polling queues when WebSocket is NOT connected.
+	// When WS is connected, commands arrive instantly — no need to poll.
+	if s.wsClient == nil || !s.wsClient.IsConnected() {
+		activeRepos := s.lastRepos
+		if len(activeRepos) == 0 {
+			activeRepos = repos
+		}
+		s.checkPendingRestores(ctx, activeRepos)
+		s.checkPendingBackups(ctx, activeRepos)
+		s.checkPendingFileDumps(ctx, activeRepos)
 	}
-	s.checkPendingRestores(ctx, activeRepos)
-	s.checkPendingBackups(ctx, activeRepos)
-	s.checkPendingFileDumps(ctx, activeRepos)
 }
 
 func (s *Scheduler) autoInitRepo(ctx context.Context, repo api.RepoConfig) {
