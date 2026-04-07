@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-07
+
+### Added
+- Real-time WebSocket connection to NerdBackup server (replaces 5-min polling)
+- Persistent connection with exponential backoff reconnect (1s→60s with jitter)
+- Progress streaming over WebSocket every 5s during backup
+- Instant command delivery: start_backup, pause, cancel, resume, config_update
+- Falls back to HTTP polling when WebSocket unavailable
+- Job reports prefer WebSocket with HTTP fallback
+- Heartbeat over WebSocket (HTTP fallback when disconnected)
+
 ## [0.3.3] - 2026-04-07
 
 ### Fixed
