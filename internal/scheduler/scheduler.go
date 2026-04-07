@@ -220,6 +220,23 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 	log := logging.Log.With().Str("repo", repo.ID).Logger()
 	log.Info().Strs("paths", repo.Paths).Msg("Starting scheduled backup")
 
+	djID := ""
+	if len(dashboardJobID) > 0 {
+		djID = dashboardJobID[0]
+	}
+
+	// Notify server that backup has started (so dashboard shows "running")
+	if s.wsClient != nil && s.wsClient.IsConnected() {
+		_ = s.wsClient.Send(ws.Message{
+			Type: "job_started",
+			Data: map[string]string{
+				"job_id":  djID,
+				"repo_id": repo.ID,
+				"status":  "running",
+			},
+		})
+	}
+
 	// Run pre-backup hook
 	if err := runPreHook(ctx, repo.PreBackupCommand); err != nil {
 		log.Error().Err(err).Msg("Pre-backup hook failed — skipping backup")
@@ -284,11 +301,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 
 	completedAt := time.Now()
 
-	// Build job report
-	djID := ""
-	if len(dashboardJobID) > 0 {
-		djID = dashboardJobID[0]
-	}
+	// Build job report (djID already set at function start)
 
 	report := api.JobReportRequest{
 		RepoID:         repo.ID,
