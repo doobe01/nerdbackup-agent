@@ -12,6 +12,17 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// safeWriter wraps a writer and silently ignores errors.
+// Used for stderr which may be disconnected in a Windows Service.
+type safeWriter struct {
+	w io.Writer
+}
+
+func (s *safeWriter) Write(p []byte) (int, error) {
+	n, _ := s.w.Write(p) // ignore error
+	return n, nil         // always return success so MultiWriter continues
+}
+
 // grantSystemAccess runs icacls to grant LOCAL SYSTEM write access (Windows only).
 func grantSystemAccess(dir string) error {
 	return exec.Command("icacls", dir, "/grant", "SYSTEM:(OI)(CI)(F)", "/T", "/Q").Run()
@@ -90,14 +101,17 @@ func Init(debug bool) {
 
 	var writers []io.Writer
 
-	if debug {
-		writers = append(writers, zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05"})
-	} else {
-		writers = append(writers, os.Stderr)
-	}
-
+	// File writer FIRST — critical for Windows Service where stderr is disconnected.
+	// io.MultiWriter stops on first error, so if stderr fails, file would be skipped.
 	if fileErr == nil {
 		writers = append(writers, &syncWriter{f: logFile})
+	}
+
+	// Console writer — wrap in safeWriter to ignore errors (service has no console)
+	if debug {
+		writers = append(writers, &safeWriter{w: zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05"}})
+	} else {
+		writers = append(writers, &safeWriter{w: os.Stderr})
 	}
 
 	multi := io.MultiWriter(writers...)
