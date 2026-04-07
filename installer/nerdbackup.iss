@@ -180,6 +180,10 @@ begin
     // 3. Kill any remaining agent process (so files can be deleted)
     Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#MyAppExeName}',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // 4. Kill any running restic process (may still be mid-backup)
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM restic.exe',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Sleep(1000);
 
     // 4. Deregister from NerdBackup API (best effort)
