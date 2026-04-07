@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-07
+
 ### Changed
 - Replaced `autoInitRepo` with `ensureRepoReady` — always verifies repo accessibility before backup (never trusts local state), clears stale locks first, and verifies init succeeded
 - `runBackup` now calls `ensureRepoReady` before every backup with proper error handling and dashboard status reporting on failure
