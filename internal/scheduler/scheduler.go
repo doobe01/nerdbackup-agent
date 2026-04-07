@@ -431,9 +431,14 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 	}
 
 	if err != nil {
-		report.Status = "failed"
-		report.ErrorMessage = err.Error()
-		log.Error().Err(err).Msg("Backup failed")
+		if backupCtx.Err() == context.Canceled {
+			report.Status = "cancelled"
+			log.Info().Msg("Backup cancelled by user")
+		} else {
+			report.Status = "failed"
+			report.ErrorMessage = err.Error()
+			log.Error().Err(err).Msg("Backup failed")
+		}
 	} else {
 		report.Status = "completed"
 		report.ResticSnapshotID = summary.SnapshotID
@@ -463,14 +468,19 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 		_ = config.Save(s.cfg)
 	}
 
-	// Report to API — prefer WebSocket (instant), fall back to HTTP (with retry + pending persistence)
-	if s.wsClient != nil && s.wsClient.IsConnected() {
-		if wsErr := s.wsClient.SendJobReport(report); wsErr != nil {
-			log.Warn().Err(wsErr).Msg("WebSocket job report failed, falling back to HTTP")
+	// Skip reporting if cancelled — dashboard already set the status
+	if report.Status == "cancelled" {
+		log.Info().Msg("Skipping job report for cancelled backup — dashboard handles status")
+	} else {
+		// Report to API — prefer WebSocket (instant), fall back to HTTP (with retry + pending persistence)
+		if s.wsClient != nil && s.wsClient.IsConnected() {
+			if wsErr := s.wsClient.SendJobReport(report); wsErr != nil {
+				log.Warn().Err(wsErr).Msg("WebSocket job report failed, falling back to HTTP")
+				_ = s.client.ReportJob(ctx, report)
+			}
+		} else {
 			_ = s.client.ReportJob(ctx, report)
 		}
-	} else {
-		_ = s.client.ReportJob(ctx, report)
 	}
 
 	// Run post-backup hook (runs even if backup failed)
