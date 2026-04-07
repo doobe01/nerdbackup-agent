@@ -60,17 +60,20 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environmen
 Filename: "{app}\{#MyAppExeName}"; Parameters: "init --install-token ""{code:GetInstallToken}"" --api-url ""{code:GetApiUrl}"""; \
   StatusMsg: "Registering agent with NerdBackup..."; Flags: runhidden waituntilterminated; \
   Check: HasInstallToken
-; Install Windows Service
+; Install and start Windows Service (nowait — service starts in background)
 Filename: "{app}\{#MyAppExeName}"; Parameters: "service install"; \
   StatusMsg: "Installing Windows service..."; Flags: runhidden waituntilterminated
-; Start Windows Service
 Filename: "{app}\{#MyAppExeName}"; Parameters: "service start"; \
-  StatusMsg: "Starting NerdBackup Agent..."; Flags: runhidden waituntilterminated
+  StatusMsg: "Starting NerdBackup Agent..."; Flags: runhidden nowait
 
 [UninstallRun]
-; Deregister from API, stop service, remove service, clean up config
-Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; \
+; Stop and remove service, deregister from API
+Filename: "{app}\{#MyAppExeName}"; Parameters: "service stop"; \
   Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyAppExeName}"; Parameters: "service uninstall"; \
+  Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; \
+  Flags: runhidden nowait
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{commonappdata}\NerdBackup"
