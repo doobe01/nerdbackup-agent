@@ -28,6 +28,11 @@ func Start(ctx context.Context, client *api.Client, agentVersion, resticVersion 
 	}
 }
 
+// SendOnce sends a single heartbeat via HTTP. Used as a fallback when WebSocket is unavailable.
+func SendOnce(ctx context.Context, client *api.Client, agentVersion, resticVersion string, startedAt time.Time) {
+	send(ctx, client, agentVersion, resticVersion, startedAt)
+}
+
 func send(ctx context.Context, client *api.Client, agentVersion, resticVersion string, startedAt time.Time) {
 	hostname, _ := os.Hostname()
 

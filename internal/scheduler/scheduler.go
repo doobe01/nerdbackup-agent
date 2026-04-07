@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/doobe01/nerdbackup-agent/internal/config"
 	"github.com/doobe01/nerdbackup-agent/internal/logging"
 	"github.com/doobe01/nerdbackup-agent/internal/restic"
+	"github.com/doobe01/nerdbackup-agent/internal/ws"
 	"github.com/robfig/cron/v3"
 )
 
@@ -23,6 +25,7 @@ type Scheduler struct {
 	syncInterval time.Duration
 	cfg          *config.AgentConfig
 	backupCounts map[string]int // repo ID → backup count since last health check
+	wsClient     *ws.Client    // optional WebSocket client for real-time progress
 }
 
 // New creates a scheduler.
@@ -37,6 +40,83 @@ func New(client *api.Client, resticBinary, agentID string, cfg *config.AgentConf
 		syncInterval: syncInterval,
 		cfg:          cfg,
 		backupCounts: make(map[string]int),
+	}
+}
+
+// SetWSClient sets the WebSocket client used for real-time progress streaming.
+func (s *Scheduler) SetWSClient(wsClient *ws.Client) {
+	s.wsClient = wsClient
+}
+
+// HandleCommand processes a command received from the WebSocket server.
+// Commands are dispatched from the server (dashboard/API) to the agent in real time.
+func (s *Scheduler) HandleCommand(cmd ws.Command) {
+	log := logging.Log.With().Str("action", cmd.Action).Str("job_id", cmd.JobID).Logger()
+	log.Info().Msg("Received command via WebSocket")
+
+	switch cmd.Action {
+	case "start_backup":
+		// Extract repo ID from command data
+		var data struct {
+			RepoID string `json:"repo_id"`
+			JobID  string `json:"job_id"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &data)
+		}
+		if data.RepoID == "" && cmd.JobID != "" {
+			data.JobID = cmd.JobID
+		}
+
+		// Find the repo and run backup in background
+		go func() {
+			repos := s.lastRepos
+			if len(repos) == 0 {
+				log.Warn().Msg("No repos configured, cannot start backup")
+				return
+			}
+
+			var targetRepo *api.RepoConfig
+			for i := range repos {
+				if data.RepoID != "" && repos[i].ID == data.RepoID {
+					targetRepo = &repos[i]
+					break
+				}
+			}
+			if targetRepo == nil && len(repos) > 0 {
+				targetRepo = &repos[0]
+			}
+			if targetRepo == nil {
+				log.Warn().Msg("No matching repo for backup command")
+				return
+			}
+
+			ctx := context.Background()
+			s.runBackup(ctx, *targetRepo, data.JobID)
+		}()
+
+	case "cancel":
+		// Cancel is handled via context cancellation in the restic runner.
+		// For now, log it. Full cancellation requires tracking running processes
+		// per job, which is a follow-up task.
+		log.Info().Msg("Cancel command received (process cancellation is a follow-up task)")
+
+	case "pause":
+		log.Info().Msg("Pause command received (process signaling is a follow-up task)")
+
+	case "resume":
+		log.Info().Msg("Resume command received (process signaling is a follow-up task)")
+
+	case "config_update":
+		// Force an immediate config re-sync
+		log.Info().Msg("Config update command received, triggering re-sync")
+		go func() {
+			ctx := context.Background()
+			s.syncAndSchedule(ctx)
+		}()
+
+	default:
+		log.Warn().Msg("Unknown command action")
 	}
 }
 
@@ -177,15 +257,25 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 	}, func(p restic.ProgressEntry) {
 		log.Debug().Float64("percent", p.PercentDone*100).Int64("bytes", p.BytesDone).Msg("Progress")
 
-		// Report progress to API every 10 seconds
-		if time.Since(lastProgressReport) > 10*time.Second {
-			s.client.ReportProgress(ctx, api.ProgressReport{
-				RepoID:         repo.ID,
-				PercentDone:    p.PercentDone,
-				BytesProcessed: p.BytesDone,
-				FilesProcessed: p.FilesDone,
-				StartedAt:      startedAt.Format(time.RFC3339),
-			})
+		// Report progress — prefer WebSocket (instant), fall back to HTTP (best-effort)
+		if time.Since(lastProgressReport) > 5*time.Second {
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.SendProgress(ws.ProgressData{
+					RepoID:         repo.ID,
+					PercentDone:    p.PercentDone,
+					BytesProcessed: p.BytesDone,
+					FilesProcessed: p.FilesDone,
+					StartedAt:      startedAt.Format(time.RFC3339),
+				})
+			} else {
+				s.client.ReportProgress(ctx, api.ProgressReport{
+					RepoID:         repo.ID,
+					PercentDone:    p.PercentDone,
+					BytesProcessed: p.BytesDone,
+					FilesProcessed: p.FilesDone,
+					StartedAt:      startedAt.Format(time.RFC3339),
+				})
+			}
 			lastProgressReport = time.Now()
 		}
 	})
@@ -240,8 +330,15 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 		_ = config.Save(s.cfg)
 	}
 
-	// Report to API (with retry + pending persistence)
-	_ = s.client.ReportJob(ctx, report)
+	// Report to API — prefer WebSocket (instant), fall back to HTTP (with retry + pending persistence)
+	if s.wsClient != nil && s.wsClient.IsConnected() {
+		if wsErr := s.wsClient.SendJobReport(report); wsErr != nil {
+			log.Warn().Err(wsErr).Msg("WebSocket job report failed, falling back to HTTP")
+			_ = s.client.ReportJob(ctx, report)
+		}
+	} else {
+		_ = s.client.ReportJob(ctx, report)
+	}
 
 	// Run post-backup hook (runs even if backup failed)
 	snapshotID := ""

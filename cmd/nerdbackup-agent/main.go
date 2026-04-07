@@ -21,6 +21,7 @@ import (
 	"github.com/doobe01/nerdbackup-agent/internal/scheduler"
 	"github.com/doobe01/nerdbackup-agent/internal/service"
 	"github.com/doobe01/nerdbackup-agent/internal/updater"
+	"github.com/doobe01/nerdbackup-agent/internal/ws"
 	"github.com/spf13/cobra"
 )
 
@@ -242,12 +243,40 @@ func runAgent(ctx context.Context, cfg *config.AgentConfig) error {
 	resticVersion := getResticVersion(resticBinary)
 	client := api.NewClient(cfg.APIBaseURL, cfg.AgentID, cfg.AgentToken)
 
-	// Start heartbeat
-	go heartbeat.Start(ctx, client, version, resticVersion, startedAt, 60*time.Second)
-
 	// Start scheduler
 	sched := scheduler.New(client, resticBinary, cfg.AgentID, cfg, 5*time.Minute)
+
+	// Start WebSocket client for real-time communication
+	wsClient := ws.NewClient(cfg.APIBaseURL, cfg.AgentID, cfg.AgentToken, func(cmd ws.Command) {
+		sched.HandleCommand(cmd)
+	})
+	go wsClient.Run(ctx)
+
+	// Expose WS client to scheduler for progress streaming
+	sched.SetWSClient(wsClient)
+
 	go sched.Start(ctx)
+
+	// Heartbeat: send over WebSocket when connected, fall back to HTTP
+	go func() {
+		hostname, _ := os.Hostname()
+
+		// Send initial heartbeat immediately
+		sendHeartbeat(ctx, wsClient, client, version, resticVersion, startedAt, hostname)
+
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				logging.Log.Info().Msg("Heartbeat stopped")
+				return
+			case <-ticker.C:
+				sendHeartbeat(ctx, wsClient, client, version, resticVersion, startedAt, hostname)
+			}
+		}
+	}()
 
 	// Start auto-updater (checks every hour, downloads + swaps binary if new version)
 	autoUpdater := updater.New(version)
@@ -274,9 +303,35 @@ func runAgent(ctx context.Context, cfg *config.AgentConfig) error {
 	logging.Log.Info().Msg("Agent running")
 
 	<-ctx.Done()
+	wsClient.Close()
 	time.Sleep(2 * time.Second)
 	logging.Log.Info().Msg("Agent stopped")
 	return nil
+}
+
+// sendHeartbeat sends a heartbeat over WebSocket if connected, otherwise falls back to HTTP.
+func sendHeartbeat(ctx context.Context, wsClient *ws.Client, httpClient *api.Client, agentVersion, resticVersion string, startedAt time.Time, hostname string) {
+	if wsClient.IsConnected() {
+		err := wsClient.SendHeartbeat(ws.HeartbeatData{
+			AgentVersion:  agentVersion,
+			ResticVersion: resticVersion,
+			Platform:      runtime.GOOS,
+			Arch:          runtime.GOARCH,
+			Hostname:      hostname,
+			UptimeSeconds: int64(time.Since(startedAt).Seconds()),
+			CPUCount:      runtime.NumCPU(),
+			// Note: disk/memory stats are populated by the heartbeat package's platform-specific code.
+			// For the WS path we send basic info; the HTTP fallback uses the full heartbeat.Start().
+		})
+		if err == nil {
+			logging.Log.Debug().Msg("Heartbeat sent via WebSocket")
+			return
+		}
+		logging.Log.Debug().Err(err).Msg("WebSocket heartbeat failed, falling back to HTTP")
+	}
+
+	// HTTP fallback
+	heartbeat.SendOnce(ctx, httpClient, agentVersion, resticVersion, startedAt)
 }
 
 func serviceCmd() *cobra.Command {
