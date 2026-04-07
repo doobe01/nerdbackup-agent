@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-04-07
+
+### Fixed
+- Installer no longer hangs at end of install/uninstall (use nowait for service start and API deregister)
+
 ## [0.3.1] - 2026-04-07
 
 ### Fixed
