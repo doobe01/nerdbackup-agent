@@ -170,12 +170,21 @@ func runCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Start the agent (heartbeat + scheduler)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Initialize logging FIRST so any errors are captured in the log file
+			// (critical for Windows Service where stderr goes nowhere)
+			logging.Init(false)
+			logging.Log.Info().Msg("Agent starting")
+
 			cfg, err := config.Load()
 			if err != nil {
+				logging.Log.Error().Err(err).Msg("Failed to load config")
 				return fmt.Errorf("not initialized — run 'nerdbackup-agent init' first: %w", err)
 			}
 
-			logging.Init(cfg.Debug)
+			// Re-init with debug setting from config
+			if cfg.Debug {
+				logging.Init(true)
+			}
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()

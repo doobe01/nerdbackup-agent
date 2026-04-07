@@ -42,7 +42,7 @@ Source: "dist\nerdbackup-agent.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Dirs]
-Name: "{commonappdata}\NerdBackup"; Permissions: users-modify
+Name: "{commonappdata}\NerdBackup"; Permissions: everyone-modify
 
 [Icons]
 Name: "{group}\NerdBackup Agent Status"; Filename: "{app}\{#MyAppExeName}"; Parameters: "status"

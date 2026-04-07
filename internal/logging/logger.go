@@ -3,12 +3,18 @@ package logging
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/rs/zerolog"
 )
+
+// grantSystemAccess runs icacls to grant LOCAL SYSTEM write access (Windows only).
+func grantSystemAccess(dir string) error {
+	return exec.Command("icacls", dir, "/grant", "SYSTEM:(OI)(CI)(F)", "/T", "/Q").Run()
+}
 
 var Log zerolog.Logger
 
@@ -42,14 +48,20 @@ func Init(debug bool) {
 	zerolog.TimeFieldFormat = time.RFC3339
 
 	logPath := LogFilePath()
-	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
+	logDir := filepath.Dir(logPath)
+	_ = os.MkdirAll(logDir, 0777) // 0777 so Windows SYSTEM account can write
+
+	// On Windows, explicitly grant SYSTEM write access to the log directory
+	if runtime.GOOS == "windows" {
+		_ = grantSystemAccess(logDir)
+	}
 
 	// Rotate: if log file > 10MB, rename to .old and start fresh
 	if info, err := os.Stat(logPath); err == nil && info.Size() > 10*1024*1024 {
 		_ = os.Rename(logPath, logPath+".old")
 	}
 
-	logFile, fileErr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, fileErr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666) // 0666 for service access
 
 	var writers []io.Writer
 

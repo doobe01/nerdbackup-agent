@@ -92,7 +92,7 @@ func CopyToSystemPath() error {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(sysPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(sysPath), 0777); err != nil {
 		return err
 	}
 
