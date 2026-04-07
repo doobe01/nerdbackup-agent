@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-04-07
+
+### Added
+- Real cancel command — kills restic process via context cancellation
+- Force config sync when start_backup arrives with no cached repos
+
+### Fixed
+- Backup no longer fails after creating new policy (force sync fetches new repo)
+- Cancel from dashboard actually stops the running backup
+
 ## [0.5.4] - 2026-04-07
 
 ### Fixed
