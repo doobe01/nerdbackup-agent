@@ -29,7 +29,6 @@ PrivilegesRequired=admin
 ChangesEnvironment=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 WizardStyle=modern
 WizardSizePercent=100
@@ -39,7 +38,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "dist\nerdbackup-agent.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\NerdBackup"; Permissions: everyone-modify
@@ -55,25 +53,8 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environmen
   ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
   Check: NeedsAddPath(ExpandConstant('{app}'))
 
-[Run]
-; Register agent with install token (if provided)
-Filename: "{app}\{#MyAppExeName}"; Parameters: "init --install-token ""{code:GetInstallToken}"" --api-url ""{code:GetApiUrl}"""; \
-  StatusMsg: "Registering agent with NerdBackup..."; Flags: runhidden waituntilterminated; \
-  Check: HasInstallToken
-; Install and start Windows Service (nowait — service starts in background)
-Filename: "{app}\{#MyAppExeName}"; Parameters: "service install"; \
-  StatusMsg: "Installing Windows service..."; Flags: runhidden waituntilterminated
-Filename: "{app}\{#MyAppExeName}"; Parameters: "service start"; \
-  StatusMsg: "Starting NerdBackup Agent..."; Flags: runhidden nowait
-
-[UninstallRun]
-; Stop and remove service, deregister from API
-Filename: "{app}\{#MyAppExeName}"; Parameters: "service stop"; \
-  Flags: runhidden waituntilterminated
-Filename: "{app}\{#MyAppExeName}"; Parameters: "service uninstall"; \
-  Flags: runhidden waituntilterminated
-Filename: "{app}\{#MyAppExeName}"; Parameters: "uninstall"; \
-  Flags: runhidden nowait
+; NO [Run] section — all service operations handled in [Code]
+; NO [UninstallRun] section — all cleanup handled in [Code]
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{commonappdata}\NerdBackup"
@@ -86,11 +67,9 @@ var
 
 procedure InitializeWizard;
 begin
-  // Check for command-line parameters (silent install)
   InstallToken := ExpandConstant('{param:INSTALL_TOKEN|}');
   ApiUrl := ExpandConstant('{param:API_URL|https://nerdbackup.com}');
 
-  // Only show activation page if no token was passed via command line
   if InstallToken = '' then
   begin
     ActivationPage := CreateInputQueryPage(wpSelectDir,
@@ -137,24 +116,80 @@ begin
   Result := Pos(';' + Uppercase(Param) + ';', ';' + Uppercase(OrigPath) + ';') = 0;
 end;
 
+// ── Post-Install: register agent, install + start service ──
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  Token: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    // 1. Register agent with install token (if provided)
+    Token := GetInstallToken('');
+    if Token <> '' then
+    begin
+      Exec(ExpandConstant('{app}\{#MyAppExeName}'),
+        'init --install-token "' + Token + '" --api-url "' + GetApiUrl('') + '"',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+
+    // 2. Install Windows Service
+    Exec(ExpandConstant('{app}\{#MyAppExeName}'), 'service install',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // 3. Start service via sc.exe (non-blocking — don't wait for service to fully start)
+    Exec(ExpandConstant('{sys}\sc.exe'), 'start {#ServiceName}',
+      '', SW_HIDE, ewNoWait, ResultCode);
+  end;
+end;
+
+// ── Pre-Uninstall: stop service, remove service, deregister, kill process ──
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  OrigPath, AppDir: string;
+  ResultCode: Integer;
 begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // 1. Stop the service via sc.exe (not the agent binary — it's about to be deleted)
+    Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#ServiceName}',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(3000);
+
+    // 2. Delete the service registration
+    Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServiceName}',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(2000);
+
+    // 3. Kill any remaining agent process (so files can be deleted)
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#MyAppExeName}',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(1000);
+
+    // 4. Deregister from NerdBackup API (best effort — uses agent binary before deletion)
+    Exec(ExpandConstant('{app}\{#MyAppExeName}'), 'uninstall',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
   // Remove from PATH on uninstall
   if CurUninstallStep = usPostUninstall then
   begin
-    AppDir := ExpandConstant('{app}');
-    if RegQueryStringValue(HKEY_LOCAL_MACHINE,
+    RemoveFromPath(ExpandConstant('{app}'));
+  end;
+end;
+
+procedure RemoveFromPath(AppDir: string);
+var
+  OrigPath: string;
+begin
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE,
+    'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
+    'Path', OrigPath)
+  then begin
+    StringChangeEx(OrigPath, ';' + AppDir, '', True);
+    StringChangeEx(OrigPath, AppDir + ';', '', True);
+    StringChangeEx(OrigPath, AppDir, '', True);
+    RegWriteStringValue(HKEY_LOCAL_MACHINE,
       'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
-      'Path', OrigPath)
-    then begin
-      StringChangeEx(OrigPath, ';' + AppDir, '', True);
-      StringChangeEx(OrigPath, AppDir + ';', '', True);
-      StringChangeEx(OrigPath, AppDir, '', True);
-      RegWriteStringValue(HKEY_LOCAL_MACHINE,
-        'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
-        'Path', OrigPath);
-    end;
+      'Path', OrigPath);
   end;
 end;

@@ -27,6 +27,15 @@ import (
 var version = "dev"
 
 func main() {
+	// CRITICAL: Detect Windows Service mode BEFORE Cobra.
+	// Windows Services have no console — Cobra writing to stderr causes failures.
+	// Professional agents (Tailscale, Datadog) all do this.
+	if service.IsWindowsService() {
+		runAsWindowsService()
+		return
+	}
+
+	// Interactive mode — Cobra handles everything
 	root := &cobra.Command{
 		Use:     "nerdbackup-agent",
 		Short:   "NerdBackup Agent — Restic-powered backup for local files",
@@ -51,6 +60,29 @@ func main() {
 	}
 }
 
+// runAsWindowsService runs the agent directly as a Windows Service.
+// Skips Cobra entirely — no stderr, no console output.
+func runAsWindowsService() {
+	logging.Init(false, true) // isService=true → file only, no stderr
+	logging.Log.Info().Str("version", version).Msg("Starting as Windows Service")
+
+	cfg, err := config.Load()
+	if err != nil {
+		logging.Log.Error().Err(err).Msg("Failed to load config — service cannot start")
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := service.RunAsService(
+		func() error { return runAgent(ctx, cfg) },
+		func() { cancel() },
+	); err != nil {
+		logging.Log.Error().Err(err).Msg("Service exited with error")
+	}
+}
+
 func initCmd() *cobra.Command {
 	var apiKey string
 	var installToken string
@@ -61,7 +93,7 @@ func initCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Register this agent with NerdBackup",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.Init(true)
+			logging.Init(true, false)
 
 			if config.Exists() {
 				return fmt.Errorf("agent already initialized — config at %s", config.ConfigPath())
@@ -170,41 +202,17 @@ func runCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Start the agent (heartbeat + scheduler)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Write startup marker so we can diagnose service issues
-			if service.IsWindowsService() {
-				marker := fmt.Sprintf("Service started at %s, PID %d\n", time.Now().Format(time.RFC3339), os.Getpid())
-				_ = os.WriteFile(`C:\ProgramData\NerdBackup\service-start.txt`, []byte(marker), 0666)
-			}
-
-			// Initialize logging FIRST so any errors are captured in the log file
-			// (critical for Windows Service where stderr goes nowhere)
-			logging.Init(false)
-			logging.Log.Info().Msg("Agent starting")
-
+			// Interactive mode only (Windows Service goes through runAsWindowsService)
 			cfg, err := config.Load()
 			if err != nil {
-				logging.Log.Error().Err(err).Msg("Failed to load config")
 				return fmt.Errorf("not initialized — run 'nerdbackup-agent init' first: %w", err)
 			}
 
-			// Re-init with debug setting from config
-			if cfg.Debug {
-				logging.Init(true)
-			}
+			logging.Init(cfg.Debug, false) // interactive mode — stderr + file
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// If running as a Windows Service, use the service handler
-			if service.IsWindowsService() {
-				logging.Log.Info().Msg("Running as Windows Service")
-				return service.RunAsService(
-					func() error { return runAgent(ctx, cfg) },
-					func() { cancel() },
-				)
-			}
-
-			// Interactive mode — handle signals
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
@@ -281,7 +289,7 @@ func serviceCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Register as a system service",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.Init(true)
+			logging.Init(true, false)
 			if !config.Exists() {
 				return fmt.Errorf("not initialized — run 'nerdbackup-agent init' first")
 			}
@@ -297,7 +305,7 @@ func serviceCmd() *cobra.Command {
 		Use:   "uninstall",
 		Short: "Remove the system service",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.Init(true)
+			logging.Init(true, false)
 			return service.Uninstall()
 		},
 	})
@@ -306,7 +314,7 @@ func serviceCmd() *cobra.Command {
 		Use:   "start",
 		Short: "Start the system service",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.Init(true)
+			logging.Init(true, false)
 			return service.Start()
 		},
 	})
@@ -315,7 +323,7 @@ func serviceCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop the system service",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.Init(true)
+			logging.Init(true, false)
 			return service.Stop()
 		},
 	})
@@ -335,7 +343,7 @@ func backupCmd() *cobra.Command {
 				return fmt.Errorf("not initialized: %w", err)
 			}
 
-			logging.Init(true)
+			logging.Init(true, false)
 			ctx := context.Background()
 			client := api.NewClient(cfg.APIBaseURL, cfg.AgentID, cfg.AgentToken)
 
@@ -478,7 +486,7 @@ func snapshotsCmd() *cobra.Command {
 				return fmt.Errorf("not initialized: %w", err)
 			}
 
-			logging.Init(false)
+			logging.Init(false, false)
 			ctx := context.Background()
 			client := api.NewClient(cfg.APIBaseURL, cfg.AgentID, cfg.AgentToken)
 
@@ -530,7 +538,7 @@ func restoreCmd() *cobra.Command {
 				return fmt.Errorf("not initialized: %w", err)
 			}
 
-			logging.Init(true)
+			logging.Init(true, false)
 			ctx := context.Background()
 			client := api.NewClient(cfg.APIBaseURL, cfg.AgentID, cfg.AgentToken)
 
@@ -597,7 +605,7 @@ func doctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Run diagnostic checks on the agent setup",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.Init(false)
+			logging.Init(false, false)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 
@@ -654,7 +662,7 @@ func updateCmd() *cobra.Command {
 				return fmt.Errorf("not initialized: %w", err)
 			}
 
-			logging.Init(true)
+			logging.Init(true, false)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
@@ -685,7 +693,7 @@ func uninstallCmd() *cobra.Command {
 		Use:   "uninstall",
 		Short: "Deregister from NerdBackup, stop service, and clean up",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.Init(true)
+			logging.Init(true, false)
 
 			cfg, err := config.Load()
 			if err != nil {
@@ -750,7 +758,7 @@ func dockerDiscoverCmd() *cobra.Command {
 		Use:   "docker-discover",
 		Short: "Discover Docker volumes and Compose projects",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.Init(true)
+			logging.Init(true, false)
 			ctx := context.Background()
 
 			if !docker.IsDockerAvailable(ctx) {
