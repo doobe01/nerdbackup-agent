@@ -52,6 +52,14 @@ $ nerdbackup-agent backup
 
 ## Install
 
+**Zero-touch from dashboard (recommended):**
+
+1. Go to **Dashboard > Agents > Install Agent**
+2. Download the installer for your platform (includes a pre-authenticated install token)
+3. Run the installer -- it registers, installs restic, configures the service, and starts the agent automatically
+
+No terminal commands, no API key copy-paste. The agent appears in your dashboard within seconds.
+
 **Linux / macOS:**
 ```bash
 curl -sSL https://nerdbackup.com/install.sh | sh
@@ -60,6 +68,13 @@ curl -sSL https://nerdbackup.com/install.sh | sh
 **Windows (PowerShell):**
 ```powershell
 irm https://nerdbackup.com/install.ps1 | iex
+```
+
+**Windows installer (.exe):**
+
+Download from [Releases](https://github.com/doobe01/nerdbackup-agent/releases) or from the dashboard. Supports silent install:
+```powershell
+nerdbackup-agent-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /INSTALL_TOKEN=your_token
 ```
 
 **From source:**
@@ -77,6 +92,9 @@ go install github.com/doobe01/nerdbackup-agent/cmd/nerdbackup-agent@latest
 # 1. Register with NerdBackup (uses your API key for initial auth)
 nerdbackup-agent init --api-key nb_live_xxxxx
 
+# Or use a pre-authenticated install token from the dashboard
+nerdbackup-agent init --install-token nb_install_xxxxx
+
 # 2. Start the agent (heartbeat + scheduled backups)
 nerdbackup-agent run
 
@@ -91,6 +109,7 @@ nerdbackup-agent install-service
 | Command | Description |
 |---------|-------------|
 | `init --api-key KEY` | Register agent with NerdBackup |
+| `init --install-token TOKEN` | Register using a pre-authenticated install token (from dashboard) |
 | `run` | Start agent daemon (heartbeat + scheduler) |
 | `backup [--repo ID]` | Trigger immediate backup |
 | `restore SNAPSHOT TARGET` | Restore a snapshot to a directory |
@@ -98,7 +117,12 @@ nerdbackup-agent install-service
 | `status` | Show agent config and status |
 | `doctor` | Run diagnostic checks on the setup |
 | `update` | Check for available agent updates |
-| `install-service` | Install as systemd/launchd/scheduled task |
+| `install-service` | Install as systemd/launchd/Windows Service |
+| `service install` | Register as Windows Service / systemd unit / launchd plist |
+| `service uninstall` | Remove the system service |
+| `service start` | Start the service |
+| `service stop` | Stop the service |
+| `uninstall` | Deregister from NerdBackup API, stop + remove service, clean up config |
 | `docker-discover` | Discover Docker volumes and Compose projects |
 
 ---
@@ -119,6 +143,8 @@ nerdbackup-agent install-service
 - **Exclude presets** — built-in patterns for `developer`, `macos`, `windows`, `full-system`
 - **Docker discovery** — finds volumes and Compose projects for backup config
 - **Full system backup** — preset with disaster recovery metadata capture
+- **File logging** — logs to `C:\ProgramData\NerdBackup\agent.log` (Windows) or `~/.nerdbackup/agent.log` (Linux/macOS), auto-rotates at 10MB
+- **Silent auto-update** — checks GitHub releases hourly, downloads and swaps binary automatically with zero downtime
 
 ---
 
@@ -163,13 +189,36 @@ Backup paths, schedules, excludes, and hooks are managed from the NerdBackup das
 
 ---
 
+## Logging
+
+The agent logs to both the console and a log file simultaneously:
+
+| Platform | Log path |
+|---|---|
+| Windows | `C:\ProgramData\NerdBackup\agent.log` |
+| Linux / macOS | `~/.nerdbackup/agent.log` |
+
+Log files auto-rotate at 10MB (renamed to `.old`). Set `"debug": true` in the config file for verbose output.
+
+---
+
+## Auto-Update
+
+The agent silently checks for new releases on GitHub every hour. When a new version is available, it downloads and swaps the binary automatically. The service manager (Windows Service Manager / systemd / launchd) handles restarting the agent after the swap.
+
+Config, agent ID, tokens, and repo settings are preserved across updates -- only the binary changes.
+
+To check manually: `nerdbackup-agent update`
+
+---
+
 ## Supported Platforms
 
 | OS | Arch | Binary | Service |
 |---|---|---|---|
 | Linux | amd64, arm64 | tar.gz | systemd |
 | macOS | amd64, arm64 | tar.gz | launchd |
-| Windows | amd64 | zip | scheduled task |
+| Windows | amd64 | zip | Windows Service |
 
 ---
 

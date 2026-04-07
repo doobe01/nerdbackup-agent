@@ -7,7 +7,11 @@ Built with [Inno Setup](https://jrsoftware.org/isinfo.php).
 The installer is built automatically by GitHub Actions on tag push. To build manually:
 
 1. Install [Inno Setup](https://jrsoftware.org/isdl.php) (v6.2+)
-2. Build the agent: `go build -o installer/dist/nerdbackup-agent.exe ./cmd/nerdbackup-agent`
+2. Build the agent binary into the `installer/dist/` directory:
+   ```bash
+   go build -o installer/dist/nerdbackup-agent.exe ./cmd/nerdbackup-agent
+   ```
+   **Important:** The Inno Setup script expects `nerdbackup-agent.exe` to exist in `installer/dist/` before building. The build will fail if this file is missing.
 3. Run: `iscc /DMyAppVersion=0.1.0 installer/nerdbackup.iss`
 
 Output: `installer/Output/nerdbackup-agent-0.1.0-windows-setup.exe`
@@ -17,6 +21,13 @@ Output: `installer/Output/nerdbackup-agent-0.1.0-windows-setup.exe`
 ```powershell
 nerdbackup-agent-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /INSTALL_TOKEN=your_token /API_URL=https://nerdbackup.com
 ```
+
+| Parameter | Description |
+|---|---|
+| `/VERYSILENT` | No UI at all |
+| `/SUPPRESSMSGBOXES` | Suppress confirmation dialogs |
+| `/INSTALL_TOKEN=xxx` | Pre-authenticated install token (from dashboard) |
+| `/API_URL=https://custom.url` | Override the NerdBackup API URL (defaults to `https://nerdbackup.com`) |
 
 ## What the Installer Does
 

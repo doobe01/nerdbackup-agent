@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- README: replaced "scheduled task" with "Windows Service" for Windows platform
+- README: added `service install|uninstall|start|stop` and `uninstall` commands to Commands table
+- README: added `--install-token` flag documentation for `init` command
+- README: added file logging paths (Windows/Linux/macOS) and auto-update documentation
+- README: added dashboard zero-touch install flow to Install section
+- installer/README: added `/API_URL` parameter to silent install docs
+- installer/README: clarified that agent binary must exist in `installer/dist/` before building
+
 ## [0.2.9] - 2026-04-06
 
 ### Added
