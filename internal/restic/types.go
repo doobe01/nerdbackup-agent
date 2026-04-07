@@ -73,4 +73,5 @@ type BackupOptions struct {
 	Excludes          []string
 	Tags              []string
 	BandwidthLimitKiB int
+	OnStarted         func(pid int) // called after restic process starts, with its PID
 }

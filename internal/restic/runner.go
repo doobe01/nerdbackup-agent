@@ -106,6 +106,11 @@ func (r *Runner) Backup(ctx context.Context, opts BackupOptions, onProgress func
 		return nil, fmt.Errorf("start restic: %w", err)
 	}
 
+	// Notify caller of the PID (used for pause/resume)
+	if opts.OnStarted != nil && cmd.Process != nil {
+		opts.OnStarted(cmd.Process.Pid)
+	}
+
 	var summary *BackupSummary
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -251,6 +256,7 @@ func (r *Runner) Version(ctx context.Context) string {
 func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, r.Binary, args...)
 	cmd.Env = append(os.Environ(), r.Env...)
+	setProcAttr(cmd) // set process group on Unix for pause/resume
 	return cmd
 }
 

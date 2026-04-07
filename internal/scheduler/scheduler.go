@@ -10,6 +10,7 @@ import (
 	"github.com/doobe01/nerdbackup-agent/internal/api"
 	"github.com/doobe01/nerdbackup-agent/internal/config"
 	"github.com/doobe01/nerdbackup-agent/internal/logging"
+	"github.com/doobe01/nerdbackup-agent/internal/process"
 	"github.com/doobe01/nerdbackup-agent/internal/restic"
 	"github.com/doobe01/nerdbackup-agent/internal/ws"
 	"github.com/robfig/cron/v3"
@@ -28,7 +29,8 @@ type Scheduler struct {
 	backupCounts map[string]int            // repo ID → backup count since last health check
 	wsClient     *ws.Client                // optional WebSocket client for real-time progress
 	cancelFuncs  map[string]context.CancelFunc // job ID → cancel function for running backups
-	mu           sync.Mutex                // protects cancelFuncs
+	runningPIDs  map[string]int                // job ID → restic PID for pause/resume
+	mu           sync.Mutex                    // protects cancelFuncs + runningPIDs
 }
 
 // New creates a scheduler.
@@ -44,6 +46,7 @@ func New(client *api.Client, resticBinary, agentID string, cfg *config.AgentConf
 		cfg:          cfg,
 		backupCounts: make(map[string]int),
 		cancelFuncs:  make(map[string]context.CancelFunc),
+		runningPIDs:  make(map[string]int),
 	}
 }
 
@@ -109,25 +112,93 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 
 	case "cancel":
 		s.mu.Lock()
+		// Resume first if paused (context cancellation needs running process)
+		if pid, ok := s.runningPIDs[cmd.JobID]; ok {
+			_ = process.ResumeProcess(pid)
+		}
 		if cancel, ok := s.cancelFuncs[cmd.JobID]; ok {
 			log.Info().Msg("Cancelling backup")
 			cancel()
 			delete(s.cancelFuncs, cmd.JobID)
+			delete(s.runningPIDs, cmd.JobID)
 		} else {
 			// Try cancelling all running backups if no specific job ID
 			for id, cancel := range s.cancelFuncs {
+				if pid, ok := s.runningPIDs[id]; ok {
+					_ = process.ResumeProcess(pid)
+				}
 				log.Info().Str("cancelling_job", id).Msg("Cancelling backup")
 				cancel()
 				delete(s.cancelFuncs, id)
+				delete(s.runningPIDs, id)
 			}
 		}
 		s.mu.Unlock()
 
 	case "pause":
-		log.Info().Msg("Pause not yet supported — use cancel instead")
+		s.mu.Lock()
+		pid, hasPID := s.runningPIDs[cmd.JobID]
+		s.mu.Unlock()
+
+		if !hasPID {
+			// Try to pause any running backup if no specific job
+			s.mu.Lock()
+			for id, p := range s.runningPIDs {
+				pid = p
+				cmd.JobID = id
+				hasPID = true
+				break
+			}
+			s.mu.Unlock()
+		}
+
+		if hasPID {
+			if err := process.SuspendProcess(pid); err != nil {
+				log.Error().Err(err).Int("pid", pid).Msg("Failed to suspend process")
+			} else {
+				log.Info().Int("pid", pid).Msg("Backup paused")
+				if s.wsClient != nil && s.wsClient.IsConnected() {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "job_started",
+						Data: map[string]string{"job_id": cmd.JobID, "status": "paused"},
+					})
+				}
+			}
+		} else {
+			log.Warn().Msg("No running backup to pause")
+		}
 
 	case "resume":
-		log.Info().Msg("Resume not yet supported — start a new backup instead")
+		s.mu.Lock()
+		pid, hasPID := s.runningPIDs[cmd.JobID]
+		s.mu.Unlock()
+
+		if !hasPID {
+			s.mu.Lock()
+			for id, p := range s.runningPIDs {
+				pid = p
+				cmd.JobID = id
+				hasPID = true
+				break
+			}
+			s.mu.Unlock()
+		}
+
+		if hasPID {
+			if err := process.ResumeProcess(pid); err != nil {
+				log.Error().Err(err).Int("pid", pid).Msg("Failed to resume process")
+			} else {
+				log.Info().Int("pid", pid).Msg("Backup resumed")
+				if s.wsClient != nil && s.wsClient.IsConnected() {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "job_started",
+						Data: map[string]string{"job_id": cmd.JobID, "status": "running"},
+					})
+				}
+			}
+		} else {
+			log.Warn().Msg("No paused backup to resume")
+		}
 
 	case "config_update":
 		// Force an immediate config re-sync
@@ -256,6 +327,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 		defer func() {
 			s.mu.Lock()
 			delete(s.cancelFuncs, djID)
+			delete(s.runningPIDs, djID)
 			s.mu.Unlock()
 		}()
 	}
@@ -308,6 +380,14 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 		Excludes:          excludes,
 		Tags:              tags,
 		BandwidthLimitKiB: repo.BandwidthLimitKiB,
+		OnStarted: func(pid int) {
+			log.Info().Int("pid", pid).Msg("Restic process started")
+			if djID != "" {
+				s.mu.Lock()
+				s.runningPIDs[djID] = pid
+				s.mu.Unlock()
+			}
+		},
 	}, func(p restic.ProgressEntry) {
 		log.Debug().Float64("percent", p.PercentDone*100).Int64("bytes", p.BytesDone).Msg("Progress")
 
