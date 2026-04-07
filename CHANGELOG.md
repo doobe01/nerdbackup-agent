@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-04-07
+
+### Fixed
+- Auto-init restic repo before WebSocket-triggered backup (fixes "repository does not exist" on first backup from dashboard)
+
 ## [0.5.1] - 2026-04-07
 
 ### Fixed
