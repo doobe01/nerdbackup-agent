@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-07
+
+### Added
+- Single file download from dashboard — agent runs `restic dump` and uploads file content to server
+- `Dump()` method on restic runner
+- `GetPendingFileDumps()` and `UploadFileDump()` API methods
+- `checkPendingFileDumps()` in scheduler (polls alongside restores/backups)
+
 ### Changed
 - README: replaced "scheduled task" with "Windows Service" for Windows platform
 - README: added `service install|uninstall|start|stop` and `uninstall` commands to Commands table
