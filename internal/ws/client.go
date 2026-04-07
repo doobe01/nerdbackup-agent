@@ -200,8 +200,8 @@ func (c *Client) readLoop(ctx context.Context) {
 			return
 		}
 
-		if c.onCommand != nil {
-			// Dispatch command in a separate goroutine to avoid blocking the read loop
+		// Only dispatch actual commands — ignore acks and other message types
+		if cmd.Type == "command" && cmd.Action != "" && c.onCommand != nil {
 			go c.onCommand(cmd)
 		}
 	}
