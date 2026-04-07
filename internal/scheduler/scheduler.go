@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/doobe01/nerdbackup-agent/internal/api"
@@ -24,8 +25,10 @@ type Scheduler struct {
 	lastRepos    []api.RepoConfig
 	syncInterval time.Duration
 	cfg          *config.AgentConfig
-	backupCounts map[string]int // repo ID → backup count since last health check
-	wsClient     *ws.Client    // optional WebSocket client for real-time progress
+	backupCounts map[string]int            // repo ID → backup count since last health check
+	wsClient     *ws.Client                // optional WebSocket client for real-time progress
+	cancelFuncs  map[string]context.CancelFunc // job ID → cancel function for running backups
+	mu           sync.Mutex                // protects cancelFuncs
 }
 
 // New creates a scheduler.
@@ -40,6 +43,7 @@ func New(client *api.Client, resticBinary, agentID string, cfg *config.AgentConf
 		syncInterval: syncInterval,
 		cfg:          cfg,
 		backupCounts: make(map[string]int),
+		cancelFuncs:  make(map[string]context.CancelFunc),
 	}
 }
 
@@ -72,6 +76,12 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 		go func() {
 			repos := s.lastRepos
 			if len(repos) == 0 {
+				// Force a config sync — repo might have just been created
+				log.Info().Msg("No repos cached, forcing config sync")
+				s.syncAndSchedule(context.Background())
+				repos = s.lastRepos
+			}
+			if len(repos) == 0 {
 				log.Warn().Msg("No repos configured, cannot start backup")
 				return
 			}
@@ -98,16 +108,26 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 		}()
 
 	case "cancel":
-		// Cancel is handled via context cancellation in the restic runner.
-		// For now, log it. Full cancellation requires tracking running processes
-		// per job, which is a follow-up task.
-		log.Info().Msg("Cancel command received (process cancellation is a follow-up task)")
+		s.mu.Lock()
+		if cancel, ok := s.cancelFuncs[cmd.JobID]; ok {
+			log.Info().Msg("Cancelling backup")
+			cancel()
+			delete(s.cancelFuncs, cmd.JobID)
+		} else {
+			// Try cancelling all running backups if no specific job ID
+			for id, cancel := range s.cancelFuncs {
+				log.Info().Str("cancelling_job", id).Msg("Cancelling backup")
+				cancel()
+				delete(s.cancelFuncs, id)
+			}
+		}
+		s.mu.Unlock()
 
 	case "pause":
-		log.Info().Msg("Pause command received (process signaling is a follow-up task)")
+		log.Info().Msg("Pause not yet supported — use cancel instead")
 
 	case "resume":
-		log.Info().Msg("Resume command received (process signaling is a follow-up task)")
+		log.Info().Msg("Resume not yet supported — start a new backup instead")
 
 	case "config_update":
 		// Force an immediate config re-sync
@@ -225,6 +245,21 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 		djID = dashboardJobID[0]
 	}
 
+	// Create cancelable context for this backup (so cancel command can stop it)
+	backupCtx, backupCancel := context.WithCancel(ctx)
+	defer backupCancel()
+
+	if djID != "" {
+		s.mu.Lock()
+		s.cancelFuncs[djID] = backupCancel
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			delete(s.cancelFuncs, djID)
+			s.mu.Unlock()
+		}()
+	}
+
 	// Notify server that backup has started (so dashboard shows "running")
 	if s.wsClient != nil && s.wsClient.IsConnected() {
 		_ = s.wsClient.Send(ws.Message{
@@ -238,7 +273,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 	}
 
 	// Run pre-backup hook
-	if err := runPreHook(ctx, repo.PreBackupCommand); err != nil {
+	if err := runPreHook(backupCtx, repo.PreBackupCommand); err != nil {
 		log.Error().Err(err).Msg("Pre-backup hook failed — skipping backup")
 		return
 	}
@@ -248,7 +283,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 	runner := restic.NewRunner(s.resticBinary, repo.ResticRepoPath, repo.ResticPassword, storageEnv)
 
 	// Remove stale locks before backup
-	if err := runner.UnlockIfStale(ctx, 30*time.Minute); err != nil {
+	if err := runner.UnlockIfStale(backupCtx, 30*time.Minute); err != nil {
 		log.Warn().Err(err).Msg("Stale lock removal failed")
 	}
 
@@ -268,7 +303,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 
 	// Run backup with progress reporting
 	lastProgressReport := time.Time{}
-	summary, err := runner.Backup(ctx, restic.BackupOptions{
+	summary, err := runner.Backup(backupCtx, restic.BackupOptions{
 		Paths:             repo.Paths,
 		Excludes:          excludes,
 		Tags:              tags,
@@ -332,7 +367,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 		log.Info().Str("snapshot", summary.SnapshotID).Int64("added", summary.DataAdded).Msg("Backup completed")
 
 		// Capture file listing for dashboard browsing (max 500 files)
-		if files, lsErr := runner.LsFiles(ctx, summary.SnapshotID, 500); lsErr == nil && len(files) > 0 {
+		if files, lsErr := runner.LsFiles(backupCtx, summary.SnapshotID, 500); lsErr == nil && len(files) > 0 {
 			fileList := make([]map[string]interface{}, len(files))
 			for i, f := range files {
 				fileList[i] = map[string]interface{}{"path": f.Path, "size": f.Size, "modified_at": f.ModifiedAt}
