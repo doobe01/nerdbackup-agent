@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-04-07
+
+### Fixed
+- Uninstaller now kills `restic.exe` during uninstall (was still running mid-backup)
+- Auto-init restic repo before WebSocket-triggered backup
+
 ## [0.5.2] - 2026-04-07
 
 ### Fixed
