@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,10 @@ import (
 
 	"github.com/doobe01/nerdbackup-agent/internal/logging"
 )
+
+func base64Encode(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
 
 type Client struct {
 	baseURL    string
@@ -134,6 +139,63 @@ func (c *Client) GetPendingBackups(ctx context.Context) ([]PendingBackup, error)
 		return nil, err
 	}
 	return result.Data, nil
+}
+
+// GetPendingFileDumps fetches any file download requests from the dashboard.
+func (c *Client) GetPendingFileDumps(ctx context.Context) ([]PendingFileDump, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+fmt.Sprintf("/api/v1/agents/%s/pending-file-dumps", c.agentID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.agentToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("pending-file-dumps: HTTP %d", resp.StatusCode)
+	}
+
+	var result ApiResponse[[]PendingFileDump]
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// UploadFileDump uploads a dumped file back to the server (base64 encoded).
+func (c *Client) UploadFileDump(ctx context.Context, requestID string, data []byte, fileName string) error {
+	encoded := base64Encode(data)
+	payload := map[string]string{
+		"requestId": requestID,
+		"fileName":  fileName,
+		"data":      encoded,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+fmt.Sprintf("/api/v1/agents/%s/file-dump-result", c.agentID),
+		bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.agentToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload file dump: HTTP %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
 }
 
 // GetPendingRestores fetches any restore requests queued from the dashboard.

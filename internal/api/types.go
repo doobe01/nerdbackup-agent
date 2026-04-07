@@ -39,6 +39,14 @@ type PendingBackup struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// Pending file dump request from dashboard (single file download)
+type PendingFileDump struct {
+	RequestID  string `json:"requestId"`
+	SnapshotID string `json:"snapshotId"`
+	FilePath   string `json:"filePath"`
+	CreatedAt  string `json:"createdAt"`
+}
+
 // Pending restore request from dashboard
 type PendingRestore struct {
 	JobID        string   `json:"jobId"`

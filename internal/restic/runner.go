@@ -147,6 +147,11 @@ func (r *Runner) Snapshots(ctx context.Context) ([]Snapshot, error) {
 	return snapshots, nil
 }
 
+// Dump outputs a single file's contents from a snapshot.
+func (r *Runner) Dump(ctx context.Context, snapshotID string, filePath string) ([]byte, error) {
+	return r.run(ctx, "dump", snapshotID, filePath)
+}
+
 // LsFiles lists files in a snapshot, limited to maxFiles entries.
 func (r *Runner) LsFiles(ctx context.Context, snapshotID string, maxFiles int) ([]FileEntry, error) {
 	out, err := r.run(ctx, "ls", "--json", snapshotID)

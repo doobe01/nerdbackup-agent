@@ -106,6 +106,7 @@ func (s *Scheduler) syncAndSchedule(ctx context.Context) {
 	}
 	s.checkPendingRestores(ctx, activeRepos)
 	s.checkPendingBackups(ctx, activeRepos)
+	s.checkPendingFileDumps(ctx, activeRepos)
 }
 
 func (s *Scheduler) autoInitRepo(ctx context.Context, repo api.RepoConfig) {
@@ -362,6 +363,64 @@ func (s *Scheduler) checkPendingBackups(ctx context.Context, repos []api.RepoCon
 
 		logging.Log.Info().Str("repo", targetRepo.ID).Str("jobId", backup.JobID).Msg("Running dashboard-triggered backup")
 		s.runBackup(ctx, *targetRepo, backup.JobID)
+	}
+}
+
+func (s *Scheduler) checkPendingFileDumps(ctx context.Context, repos []api.RepoConfig) {
+	dumps, err := s.client.GetPendingFileDumps(ctx)
+	if err != nil {
+		logging.Log.Debug().Err(err).Msg("Failed to check pending file dumps")
+		return
+	}
+
+	if len(dumps) == 0 {
+		return
+	}
+
+	logging.Log.Info().Int("count", len(dumps)).Msg("Processing pending file dumps")
+
+	for _, dump := range dumps {
+		// Use first repo (file dumps don't specify which repo)
+		var targetRepo *api.RepoConfig
+		if len(repos) > 0 {
+			targetRepo = &repos[0]
+		}
+
+		if targetRepo == nil {
+			logging.Log.Error().Str("requestId", dump.RequestID).Msg("No repo available for file dump")
+			continue
+		}
+
+		runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
+
+		logging.Log.Info().
+			Str("snapshot", dump.SnapshotID).
+			Str("file", dump.FilePath).
+			Msg("Dumping file from snapshot")
+
+		data, err := runner.Dump(ctx, dump.SnapshotID, dump.FilePath)
+		if err != nil {
+			logging.Log.Error().Err(err).Str("file", dump.FilePath).Msg("File dump failed")
+			continue
+		}
+
+		// Upload result back to server
+		fileName := dump.FilePath
+		if idx := len(fileName) - 1; idx >= 0 {
+			// Use just the filename, not full path
+			for i := len(fileName) - 1; i >= 0; i-- {
+				if fileName[i] == '/' || fileName[i] == '\\' {
+					fileName = fileName[i+1:]
+					break
+				}
+			}
+		}
+
+		if err := s.client.UploadFileDump(ctx, dump.RequestID, data, fileName); err != nil {
+			logging.Log.Error().Err(err).Str("requestId", dump.RequestID).Msg("Failed to upload file dump")
+		} else {
+			logging.Log.Info().Str("requestId", dump.RequestID).Int("size", len(data)).Msg("File dump uploaded")
+		}
 	}
 }
 
