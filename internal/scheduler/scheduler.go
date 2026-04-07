@@ -92,6 +92,8 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 			}
 
 			ctx := context.Background()
+			// Auto-init repo if needed (first backup after policy creation)
+			s.autoInitRepo(ctx, *targetRepo)
 			s.runBackup(ctx, *targetRepo, data.JobID)
 		}()
 
