@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-04-07
+
+### Fixed
+- Agent sends `job_started` message when backup begins (server updates job to "running")
+- Jobs no longer stuck at "pending" — status reflects actual agent state
+
 ## [0.5.3] - 2026-04-07
 
 ### Fixed
