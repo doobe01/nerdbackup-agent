@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-07
+
+### Added
+- `restore` WebSocket command — instant restore from dashboard (no polling)
+- `file_dump` WebSocket command — instant file download from dashboard (no polling)
+- Both report results back via WebSocket
+
+### Fixed
+- Restore and file download no longer broken when WebSocket is connected
+
 ## [0.7.0] - 2026-04-07
 
 ### Changed
