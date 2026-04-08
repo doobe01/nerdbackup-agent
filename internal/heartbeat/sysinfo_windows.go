@@ -26,7 +26,7 @@ type memoryStatusEx struct {
 	AvailExtendedVirtual uint64
 }
 
-func getTotalMemory() int64 {
+func GetTotalMemory() int64 {
 	var mem memoryStatusEx
 	mem.Length = uint32(unsafe.Sizeof(mem))
 	ret, _, _ := globalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&mem)))
@@ -36,7 +36,7 @@ func getTotalMemory() int64 {
 	return int64(mem.TotalPhys)
 }
 
-func getFreeDisk() int64 {
+func GetFreeDisk() int64 {
 	// Use the home directory's drive instead of hardcoded C:
 	home, err := os.UserHomeDir()
 	if err != nil || len(home) < 3 {

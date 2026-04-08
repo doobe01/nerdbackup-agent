@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func getTotalMemory() int64 {
+func GetTotalMemory() int64 {
 	out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
 	if err != nil {
 		return 0
@@ -22,7 +22,7 @@ func getTotalMemory() int64 {
 	return val
 }
 
-func getFreeDisk() int64 {
+func GetFreeDisk() int64 {
 	var stat unix.Statfs_t
 	if err := unix.Statfs("/", &stat); err != nil {
 		return 0

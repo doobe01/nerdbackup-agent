@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+- WebSocket heartbeat now includes memory and disk stats (were always 0 — only HTTP fallback populated them)
+
 ## [0.9.0] - 2026-04-08
 
 ### Added

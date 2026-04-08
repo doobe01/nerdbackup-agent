@@ -320,8 +320,8 @@ func sendHeartbeat(ctx context.Context, wsClient *ws.Client, httpClient *api.Cli
 			Hostname:      hostname,
 			UptimeSeconds: int64(time.Since(startedAt).Seconds()),
 			CPUCount:      runtime.NumCPU(),
-			// Note: disk/memory stats are populated by the heartbeat package's platform-specific code.
-			// For the WS path we send basic info; the HTTP fallback uses the full heartbeat.Start().
+			MemTotalBytes: heartbeat.GetTotalMemory(),
+			DiskFreeBytes: heartbeat.GetFreeDisk(),
 		})
 		if err == nil {
 			logging.Log.Debug().Msg("Heartbeat sent via WebSocket")

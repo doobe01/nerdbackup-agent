@@ -44,8 +44,8 @@ func send(ctx context.Context, client *api.Client, agentVersion, resticVersion s
 		Hostname:      hostname,
 		UptimeSeconds: int64(time.Since(startedAt).Seconds()),
 		CPUCount:      runtime.NumCPU(),
-		MemTotalBytes: getTotalMemory(),
-		DiskFreeBytes: getFreeDisk(),
+		MemTotalBytes: GetTotalMemory(),
+		DiskFreeBytes: GetFreeDisk(),
 	}
 
 	resp, err := client.SendHeartbeat(ctx, req)
