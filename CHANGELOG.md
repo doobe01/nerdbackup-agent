@@ -6,8 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-08
+
 ### Added
-- `fs_list` WebSocket command handler -- allows the dashboard to remotely browse the agent's filesystem in real time; lists directory contents with name, type, and size; sorts directories first; supports Windows drive enumeration and Unix `/` root; sends results back via `fs_list_response` WebSocket message
+- Remote filesystem browsing via `fs_list` WebSocket command — dashboard can browse agent's filesystem in real time
+- Windows drive enumeration (A-Z), Unix root (/)
+- Directory listings sorted dirs-first, alphabetical
 
 ## [0.8.0] - 2026-04-07
 
