@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
+	"sort"
 	"sync"
 	"time"
 
@@ -364,6 +366,103 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 					Data: map[string]string{
 						"snapshot_id": data.SnapshotID,
 						"repo_id":    data.RepoID,
+					},
+				})
+			}
+		}()
+
+	case "fs_list":
+		var fsData struct {
+			RequestID string `json:"request_id"`
+			Path      string `json:"path"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &fsData)
+		}
+
+		go func() {
+			path := fsData.Path
+			if path == "" {
+				// Default: show root drives on Windows, / on Unix
+				if runtime.GOOS == "windows" {
+					// List drive letters
+					entries := []map[string]interface{}{}
+					for _, drive := range "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+						root := string(drive) + ":\\"
+						if _, err := os.Stat(root); err == nil {
+							entries = append(entries, map[string]interface{}{
+								"name": root,
+								"type": "dir",
+								"size": 0,
+							})
+						}
+					}
+					if s.wsClient != nil && s.wsClient.IsConnected() {
+						_ = s.wsClient.Send(ws.Message{
+							Type: "fs_list_response",
+							Data: map[string]interface{}{
+								"request_id": fsData.RequestID,
+								"path":       "",
+								"entries":    entries,
+							},
+						})
+					}
+					return
+				}
+				path = "/"
+			}
+
+			dirEntries, err := os.ReadDir(path)
+			if err != nil {
+				log.Error().Err(err).Str("path", path).Msg("fs_list failed")
+				if s.wsClient != nil && s.wsClient.IsConnected() {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "fs_list_response",
+						Data: map[string]interface{}{
+							"request_id": fsData.RequestID,
+							"path":       path,
+							"error":      err.Error(),
+							"entries":    []interface{}{},
+						},
+					})
+				}
+				return
+			}
+
+			entries := []map[string]interface{}{}
+			for _, e := range dirEntries {
+				entryType := "file"
+				if e.IsDir() {
+					entryType = "dir"
+				}
+				size := int64(0)
+				if info, infoErr := e.Info(); infoErr == nil {
+					size = info.Size()
+				}
+				entries = append(entries, map[string]interface{}{
+					"name": e.Name(),
+					"type": entryType,
+					"size": size,
+				})
+			}
+
+			// Sort: directories first, then files, alphabetical within each
+			sort.Slice(entries, func(i, j int) bool {
+				ti := entries[i]["type"].(string)
+				tj := entries[j]["type"].(string)
+				if ti != tj {
+					return ti == "dir"
+				}
+				return entries[i]["name"].(string) < entries[j]["name"].(string)
+			})
+
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.Send(ws.Message{
+					Type: "fs_list_response",
+					Data: map[string]interface{}{
+						"request_id": fsData.RequestID,
+						"path":       path,
+						"entries":    entries,
 					},
 				})
 			}
