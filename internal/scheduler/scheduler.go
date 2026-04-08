@@ -210,6 +210,108 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 			log.Warn().Msg("No paused backup to resume")
 		}
 
+	case "restore":
+		var restoreData struct {
+			JobID        string   `json:"jobId"`
+			SnapshotID   string   `json:"snapshotId"`
+			TargetPath   string   `json:"targetPath"`
+			IncludePaths []string `json:"includePaths"`
+			ExcludePaths []string `json:"excludePaths"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &restoreData)
+		}
+
+		go func() {
+			repos := s.lastRepos
+			if len(repos) == 0 {
+				s.syncAndSchedule(context.Background())
+				repos = s.lastRepos
+			}
+			if len(repos) == 0 {
+				log.Warn().Msg("No repos for restore command")
+				return
+			}
+
+			targetRepo := &repos[0]
+			runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
+			ctx := context.Background()
+
+			log.Info().Str("snapshot", restoreData.SnapshotID).Str("target", restoreData.TargetPath).Msg("Starting restore via WebSocket")
+			err := runner.Restore(ctx, restoreData.SnapshotID, restoreData.TargetPath, restoreData.IncludePaths, restoreData.ExcludePaths)
+
+			report := api.JobReportRequest{
+				RepoID:           targetRepo.ID,
+				DashboardJobID:   restoreData.JobID,
+				Operation:        "restore",
+				StartedAt:        time.Now(),
+				CompletedAt:      time.Now(),
+				ResticSnapshotID: restoreData.SnapshotID,
+			}
+			if err != nil {
+				report.Status = "failed"
+				report.ErrorMessage = err.Error()
+				log.Error().Err(err).Msg("Restore failed")
+			} else {
+				report.Status = "completed"
+				log.Info().Str("target", restoreData.TargetPath).Msg("Restore completed")
+			}
+
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.SendJobReport(report)
+			} else {
+				_ = s.client.ReportJob(ctx, report)
+			}
+		}()
+
+	case "file_dump":
+		var dumpData struct {
+			RequestID  string `json:"requestId"`
+			SnapshotID string `json:"snapshotId"`
+			FilePath   string `json:"filePath"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &dumpData)
+		}
+
+		go func() {
+			repos := s.lastRepos
+			if len(repos) == 0 {
+				s.syncAndSchedule(context.Background())
+				repos = s.lastRepos
+			}
+			if len(repos) == 0 {
+				log.Warn().Msg("No repos for file_dump command")
+				return
+			}
+
+			targetRepo := &repos[0]
+			runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
+			ctx := context.Background()
+
+			log.Info().Str("snapshot", dumpData.SnapshotID).Str("file", dumpData.FilePath).Msg("Dumping file via WebSocket")
+			data, err := runner.Dump(ctx, dumpData.SnapshotID, dumpData.FilePath)
+			if err != nil {
+				log.Error().Err(err).Str("file", dumpData.FilePath).Msg("File dump failed")
+				return
+			}
+
+			// Extract filename from path
+			fileName := dumpData.FilePath
+			for i := len(fileName) - 1; i >= 0; i-- {
+				if fileName[i] == '/' || fileName[i] == '\\' {
+					fileName = fileName[i+1:]
+					break
+				}
+			}
+
+			if err := s.client.UploadFileDump(ctx, dumpData.RequestID, data, fileName); err != nil {
+				log.Error().Err(err).Str("requestId", dumpData.RequestID).Msg("Failed to upload file dump")
+			} else {
+				log.Info().Str("requestId", dumpData.RequestID).Int("size", len(data)).Msg("File dump uploaded")
+			}
+		}()
+
 	case "forget_snapshot":
 		var data struct {
 			SnapshotID string `json:"snapshot_id"`
