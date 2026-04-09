@@ -728,9 +728,18 @@ func updateCmd() *cobra.Command {
 			}
 
 			if u.ForceCheckAndUpdate(ctx) {
-				fmt.Println("✓ Update installed! Restart the agent to use the new version.")
-				fmt.Println("  Windows: Restart-Service NerdBackupAgent")
-				fmt.Println("  Linux:   systemctl --user restart nerdbackup-agent")
+				fmt.Println("✓ Update installed! Restarting service...")
+				if err := service.Restart(); err != nil {
+					fmt.Printf("Could not restart service automatically: %v\n", err)
+					fmt.Println("Please restart manually:")
+					if runtime.GOOS == "windows" {
+						fmt.Println("  Restart-Service NerdBackupAgent")
+					} else {
+						fmt.Println("  systemctl --user restart nerdbackup-agent")
+					}
+				} else {
+					fmt.Println("✓ Service restarted!")
+				}
 				return nil
 			}
 

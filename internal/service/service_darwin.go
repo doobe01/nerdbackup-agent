@@ -115,6 +115,13 @@ func Stop() error {
 	return exec.Command("launchctl", "kill", "SIGTERM", domain+"/"+label).Run()
 }
 
+func Restart() error {
+	if err := Stop(); err != nil {
+		return err
+	}
+	return Start()
+}
+
 func IsWindowsService() bool { return false }
 
 func RunAsService(_ func() error, _ func()) error {

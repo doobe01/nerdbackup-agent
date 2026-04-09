@@ -147,6 +147,14 @@ func Stop() error {
 	return nil
 }
 
+// Restart stops then starts the Windows Service.
+func Restart() error {
+	if err := Stop(); err != nil {
+		return err
+	}
+	return Start()
+}
+
 // IsWindowsService returns true if the process is running as a Windows Service.
 func IsWindowsService() bool {
 	is, _ := svc.IsWindowsService()

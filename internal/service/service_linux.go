@@ -83,6 +83,10 @@ func Stop() error {
 	return exec.Command("systemctl", "--user", "stop", "nerdbackup-agent").Run()
 }
 
+func Restart() error {
+	return exec.Command("systemctl", "--user", "restart", "nerdbackup-agent").Run()
+}
+
 func IsWindowsService() bool { return false }
 
 func RunAsService(_ func() error, _ func()) error {
