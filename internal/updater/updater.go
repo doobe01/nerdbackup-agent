@@ -2,9 +2,12 @@ package updater
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"compress/bzip2"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -158,6 +161,12 @@ func downloadAndReplace(ctx context.Context, release *GitHubRelease) error {
 		return fmt.Errorf("download: %w", err)
 	}
 
+	// Verify SHA256 checksum against checksums.txt from the release
+	assetBaseName := filepath.Base(assetURL)
+	if err := verifyChecksum(ctx, release, assetBaseName, archiveData); err != nil {
+		return fmt.Errorf("checksum verification failed: %w", err)
+	}
+
 	// Extract the binary to a temp file
 	selfPath, err := os.Executable()
 	if err != nil {
@@ -243,4 +252,57 @@ func extractFromBz2(data []byte, destPath string) error {
 
 	_, err = io.Copy(out, bzReader)
 	return err
+}
+
+// verifyChecksum downloads the checksums.txt from the release and verifies
+// the archive's SHA256 hash matches. This prevents MITM binary injection.
+func verifyChecksum(ctx context.Context, release *GitHubRelease, assetName string, data []byte) error {
+	// Find checksums.txt asset
+	var checksumsURL string
+	for _, asset := range release.Assets {
+		if strings.Contains(strings.ToLower(asset.Name), "checksums") {
+			checksumsURL = asset.BrowserDownloadURL
+			break
+		}
+	}
+
+	if checksumsURL == "" {
+		logging.Log.Warn().Msg("No checksums file in release — skipping verification")
+		return nil // Don't block updates if checksums file missing (pre-existing releases)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", checksumsURL, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("download checksums: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("download checksums: HTTP %d", resp.StatusCode)
+	}
+
+	// Parse checksums.txt: each line is "sha256hash  filename"
+	actualHash := sha256.Sum256(data)
+	actualHex := hex.EncodeToString(actualHash[:])
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		if len(parts) >= 2 && parts[1] == assetName {
+			if !strings.EqualFold(parts[0], actualHex) {
+				return fmt.Errorf("SHA256 mismatch: expected %s, got %s", parts[0], actualHex)
+			}
+			logging.Log.Info().Str("asset", assetName).Msg("Checksum verified")
+			return nil
+		}
+	}
+
+	logging.Log.Warn().Str("asset", assetName).Msg("Asset not found in checksums file — skipping verification")
+	return nil
 }

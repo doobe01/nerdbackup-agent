@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"net/http"
+
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
@@ -86,15 +88,15 @@ func NewClient(apiURL, agentID, token string, onCommand func(Command)) *Client {
 }
 
 // buildWSURL converts an HTTP API base URL to a WebSocket URL.
-// https://nerdbackup.com -> wss://nerdbackup.com/ws/agent?token=xxx
-// http://localhost:3000  -> ws://localhost:3000/ws/agent?token=xxx
+// https://nerdbackup.com -> wss://nerdbackup.com/ws/agent
+// http://localhost:3000  -> ws://localhost:3000/ws/agent
+// Token is now sent via Authorization header, not query string.
 func buildWSURL(apiURL, token string) string {
 	u, err := url.Parse(apiURL)
 	if err != nil {
-		// Fallback: just swap protocol
 		wsURL := strings.Replace(apiURL, "https://", "wss://", 1)
 		wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
-		return wsURL + "/ws/agent?token=" + url.QueryEscape(token)
+		return wsURL + "/ws/agent"
 	}
 
 	switch u.Scheme {
@@ -105,9 +107,7 @@ func buildWSURL(apiURL, token string) string {
 	}
 
 	u.Path = "/ws/agent"
-	q := u.Query()
-	q.Set("token", token)
-	u.RawQuery = q.Encode()
+	_ = token // token passed via header in connect(), not in URL
 	return u.String()
 }
 
@@ -161,7 +161,9 @@ func (c *Client) connect(ctx context.Context) error {
 	defer cancel()
 
 	conn, _, err := websocket.Dial(dialCtx, c.wsURL, &websocket.DialOptions{
-		// nhooyr.io/websocket handles compression automatically
+		HTTPHeader: http.Header{
+			"Authorization": []string{"Bearer " + c.token},
+		},
 	})
 	if err != nil {
 		return err
