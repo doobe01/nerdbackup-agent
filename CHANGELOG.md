@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - WebSocket heartbeat now includes memory and disk stats (were always 0 — only HTTP fallback populated them)
+- Windows: enable VSS (Volume Shadow Copy) for backups via `--use-fs-snapshot` — fixes access to locked files and user profile directories when agent runs as SYSTEM
 
 ## [0.9.0] - 2026-04-08
 

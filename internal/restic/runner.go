@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -83,6 +84,12 @@ func (r *Runner) UnlockIfStale(ctx context.Context, maxAge time.Duration) error 
 // Backup runs a backup and streams progress.
 func (r *Runner) Backup(ctx context.Context, opts BackupOptions, onProgress func(ProgressEntry)) (*BackupSummary, error) {
 	args := []string{"backup", "--json", "--verbose"}
+
+	// On Windows, use Volume Shadow Copy for consistent access to locked/protected files
+	if runtime.GOOS == "windows" {
+		args = append(args, "--use-fs-snapshot")
+	}
+
 	args = append(args, opts.Paths...)
 	for _, e := range opts.Excludes {
 		args = append(args, "--exclude", e)
