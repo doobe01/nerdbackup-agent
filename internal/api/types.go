@@ -162,3 +162,50 @@ type StorageBackendConfig struct {
 	AccessKeyID    string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key"`
 }
+
+// PITRStatusReport is sent to the server when pitr_status is requested.
+type PITRStatusReport struct {
+	ConfigID         string `json:"config_id"`
+	DatabaseType     string `json:"database_type"`
+	DatabaseName     string `json:"database_name"`
+	ConnectionHost   string `json:"connection_host"`
+	WALCount         int    `json:"wal_count"`
+	WALSizeBytes     int64  `json:"wal_size_bytes"`
+	CurrentRPOSec    int    `json:"current_rpo_seconds"`
+	LastWALArchived  string `json:"last_wal_archived_at,omitempty"`
+	LastBaseBackup   string `json:"last_base_backup_at,omitempty"`
+	ArchiveDir       string `json:"archive_dir"`
+	Status           string `json:"status"` // "active", "error", "not_configured"
+	ErrorMessage     string `json:"error_message,omitempty"`
+}
+
+// PITRSetupResult is the response after pitr_setup completes.
+type PITRSetupResult struct {
+	ConfigID    string `json:"config_id"`
+	ConfigLines string `json:"config_lines"`
+	ArchiveDir  string `json:"archive_dir"`
+	Status      string `json:"status"` // "success" or "failed"
+	Error       string `json:"error,omitempty"`
+}
+
+// PITRBaseBackupResult is the response after pitr_base_backup completes.
+type PITRBaseBackupResult struct {
+	ConfigID         string `json:"config_id"`
+	BackupDir        string `json:"backup_dir"`
+	ResticSnapshotID string `json:"restic_snapshot_id,omitempty"`
+	Status           string `json:"status"` // "completed" or "failed"
+	StartedAt        string `json:"started_at"`
+	CompletedAt      string `json:"completed_at"`
+	Error            string `json:"error,omitempty"`
+}
+
+// PITRRestoreResult is the response after pitr_restore completes.
+type PITRRestoreResult struct {
+	ConfigID    string `json:"config_id"`
+	TargetTime  string `json:"target_time"`
+	RestoreDir  string `json:"restore_dir"`
+	Status      string `json:"status"` // "completed" or "failed"
+	StartedAt   string `json:"started_at"`
+	CompletedAt string `json:"completed_at"`
+	Error       string `json:"error,omitempty"`
+}

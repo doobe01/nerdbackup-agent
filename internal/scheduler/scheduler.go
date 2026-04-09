@@ -13,6 +13,7 @@ import (
 	"github.com/doobe01/nerdbackup-agent/internal/api"
 	"github.com/doobe01/nerdbackup-agent/internal/config"
 	"github.com/doobe01/nerdbackup-agent/internal/logging"
+	"github.com/doobe01/nerdbackup-agent/internal/pitr"
 	"github.com/doobe01/nerdbackup-agent/internal/process"
 	"github.com/doobe01/nerdbackup-agent/internal/restic"
 	"github.com/doobe01/nerdbackup-agent/internal/ws"
@@ -474,6 +475,351 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 		go func() {
 			ctx := context.Background()
 			s.syncAndSchedule(ctx)
+		}()
+
+	case "pitr_setup":
+		var data struct {
+			ConfigID           string `json:"config_id"`
+			DatabaseType       string `json:"database_type"`
+			ConnectionHost     string `json:"connection_host"`
+			ConnectionPort     int    `json:"connection_port"`
+			DatabaseName       string `json:"database_name"`
+			User               string `json:"user"`
+			Password           string `json:"password"`
+			WALArchiveDir      string `json:"wal_archive_dir"`
+			BaseBackupDir      string `json:"base_backup_dir"`
+			WALArchiveInterval int    `json:"wal_archive_interval"`
+			BaseBackupCron     string `json:"base_backup_cron"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &data)
+		}
+
+		go func() {
+			cfg := pitr.PITRConfig{
+				DatabaseType:       data.DatabaseType,
+				ConnectionHost:     data.ConnectionHost,
+				ConnectionPort:     data.ConnectionPort,
+				DatabaseName:       data.DatabaseName,
+				User:               data.User,
+				Password:           data.Password,
+				WALArchiveDir:      data.WALArchiveDir,
+				BaseBackupDir:      data.BaseBackupDir,
+				WALArchiveInterval: data.WALArchiveInterval,
+				BaseBackupCron:     data.BaseBackupCron,
+			}
+
+			result := api.PITRSetupResult{
+				ConfigID: data.ConfigID,
+			}
+
+			configLines, archiveDir, err := pitr.SetupPostgresWAL(cfg)
+			if err != nil {
+				log.Error().Err(err).Msg("PITR setup failed")
+				result.Status = "failed"
+				result.Error = err.Error()
+			} else {
+				log.Info().Str("archive_dir", archiveDir).Msg("PITR setup completed")
+				result.Status = "success"
+				result.ConfigLines = configLines
+				result.ArchiveDir = archiveDir
+			}
+
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.Send(ws.Message{
+					Type: "pitr_setup_result",
+					Data: result,
+				})
+			}
+		}()
+
+	case "pitr_base_backup":
+		var data struct {
+			ConfigID       string `json:"config_id"`
+			DatabaseType   string `json:"database_type"`
+			ConnectionHost string `json:"connection_host"`
+			ConnectionPort int    `json:"connection_port"`
+			DatabaseName   string `json:"database_name"`
+			User           string `json:"user"`
+			Password       string `json:"password"`
+			WALArchiveDir  string `json:"wal_archive_dir"`
+			BaseBackupDir  string `json:"base_backup_dir"`
+			RepoID         string `json:"repo_id"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &data)
+		}
+
+		go func() {
+			cfg := pitr.PITRConfig{
+				DatabaseType:   data.DatabaseType,
+				ConnectionHost: data.ConnectionHost,
+				ConnectionPort: data.ConnectionPort,
+				DatabaseName:   data.DatabaseName,
+				User:           data.User,
+				Password:       data.Password,
+				WALArchiveDir:  data.WALArchiveDir,
+				BaseBackupDir:  data.BaseBackupDir,
+			}
+
+			startedAt := time.Now()
+			result := api.PITRBaseBackupResult{
+				ConfigID:  data.ConfigID,
+				StartedAt: startedAt.Format(time.RFC3339),
+			}
+
+			ctx := context.Background()
+
+			// Step 1: Run pg_basebackup
+			log.Info().Str("host", cfg.ConnectionHost).Str("db", cfg.DatabaseName).Msg("Starting PITR base backup")
+			backupDir, err := pitr.RunBaseBackup(ctx, cfg)
+			if err != nil {
+				log.Error().Err(err).Msg("PITR base backup failed")
+				result.Status = "failed"
+				result.Error = err.Error()
+				result.CompletedAt = time.Now().Format(time.RFC3339)
+				if s.wsClient != nil && s.wsClient.IsConnected() {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "pitr_base_backup_result",
+						Data: result,
+					})
+				}
+				return
+			}
+			result.BackupDir = backupDir
+
+			// Step 2: Upload base backup to S3 via restic
+			var targetRepo *api.RepoConfig
+			repos := s.lastRepos
+			for i := range repos {
+				if data.RepoID != "" && repos[i].ID == data.RepoID {
+					targetRepo = &repos[i]
+					break
+				}
+			}
+			if targetRepo == nil && len(repos) > 0 {
+				targetRepo = &repos[0]
+			}
+
+			if targetRepo != nil {
+				runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
+
+				// Ensure repo is ready
+				if initErr := s.ensureRepoReady(ctx, *targetRepo); initErr != nil {
+					log.Warn().Err(initErr).Msg("Repo not ready for PITR base backup upload")
+				}
+
+				snapshotID, uploadErr := pitr.UploadBaseBackup(ctx, runner, backupDir, cfg)
+				if uploadErr != nil {
+					log.Error().Err(uploadErr).Msg("PITR base backup upload to S3 failed")
+					result.Status = "failed"
+					result.Error = fmt.Sprintf("backup succeeded but upload failed: %s", uploadErr.Error())
+				} else {
+					result.Status = "completed"
+					result.ResticSnapshotID = snapshotID
+					log.Info().Str("snapshot_id", snapshotID).Msg("PITR base backup uploaded to S3")
+				}
+			} else {
+				// No repo configured — backup is local only
+				result.Status = "completed"
+				log.Warn().Msg("No restic repo configured — base backup stored locally only")
+			}
+
+			result.CompletedAt = time.Now().Format(time.RFC3339)
+
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.Send(ws.Message{
+					Type: "pitr_base_backup_result",
+					Data: result,
+				})
+			}
+		}()
+
+	case "pitr_restore":
+		var data struct {
+			ConfigID       string `json:"config_id"`
+			DatabaseType   string `json:"database_type"`
+			ConnectionHost string `json:"connection_host"`
+			ConnectionPort int    `json:"connection_port"`
+			DatabaseName   string `json:"database_name"`
+			User           string `json:"user"`
+			Password       string `json:"password"`
+			WALArchiveDir  string `json:"wal_archive_dir"`
+			BaseBackupDir  string `json:"base_backup_dir"`
+			TargetTime     string `json:"target_time"`
+			RestoreDir     string `json:"restore_dir"`
+			RepoID         string `json:"repo_id"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &data)
+		}
+
+		go func() {
+			cfg := pitr.PITRConfig{
+				DatabaseType:   data.DatabaseType,
+				ConnectionHost: data.ConnectionHost,
+				ConnectionPort: data.ConnectionPort,
+				DatabaseName:   data.DatabaseName,
+				User:           data.User,
+				Password:       data.Password,
+				WALArchiveDir:  data.WALArchiveDir,
+				BaseBackupDir:  data.BaseBackupDir,
+			}
+
+			startedAt := time.Now()
+			result := api.PITRRestoreResult{
+				ConfigID:   data.ConfigID,
+				TargetTime: data.TargetTime,
+				RestoreDir: data.RestoreDir,
+				StartedAt:  startedAt.Format(time.RFC3339),
+			}
+
+			ctx := context.Background()
+
+			// Parse target time
+			targetTime, parseErr := time.Parse(time.RFC3339, data.TargetTime)
+			if parseErr != nil {
+				log.Error().Err(parseErr).Str("target_time", data.TargetTime).Msg("Invalid target time for PITR restore")
+				result.Status = "failed"
+				result.Error = fmt.Sprintf("invalid target_time: %s", parseErr.Error())
+				result.CompletedAt = time.Now().Format(time.RFC3339)
+				if s.wsClient != nil && s.wsClient.IsConnected() {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "pitr_restore_result",
+						Data: result,
+					})
+				}
+				return
+			}
+
+			restoreDir := data.RestoreDir
+			if restoreDir == "" {
+				restoreDir = fmt.Sprintf("/var/lib/nerdbackup/pitr-restore/%s", time.Now().Format("20060102-150405"))
+			}
+			result.RestoreDir = restoreDir
+
+			// Find repo for restic restore
+			var targetRepo *api.RepoConfig
+			repos := s.lastRepos
+			for i := range repos {
+				if data.RepoID != "" && repos[i].ID == data.RepoID {
+					targetRepo = &repos[i]
+					break
+				}
+			}
+			if targetRepo == nil && len(repos) > 0 {
+				targetRepo = &repos[0]
+			}
+
+			if targetRepo == nil {
+				log.Error().Msg("No restic repo configured for PITR restore")
+				result.Status = "failed"
+				result.Error = "no restic repo configured"
+				result.CompletedAt = time.Now().Format(time.RFC3339)
+				if s.wsClient != nil && s.wsClient.IsConnected() {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "pitr_restore_result",
+						Data: result,
+					})
+				}
+				return
+			}
+
+			runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
+
+			log.Info().
+				Str("target_time", targetTime.Format(time.RFC3339)).
+				Str("restore_dir", restoreDir).
+				Msg("Starting PITR restore")
+
+			if err := pitr.RestoreToPoint(ctx, cfg, runner, targetTime, restoreDir); err != nil {
+				log.Error().Err(err).Msg("PITR restore failed")
+				result.Status = "failed"
+				result.Error = err.Error()
+			} else {
+				log.Info().Msg("PITR restore completed")
+				result.Status = "completed"
+			}
+
+			result.CompletedAt = time.Now().Format(time.RFC3339)
+
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.Send(ws.Message{
+					Type: "pitr_restore_result",
+					Data: result,
+				})
+			}
+		}()
+
+	case "pitr_status":
+		var data struct {
+			ConfigID       string `json:"config_id"`
+			DatabaseType   string `json:"database_type"`
+			ConnectionHost string `json:"connection_host"`
+			ConnectionPort int    `json:"connection_port"`
+			DatabaseName   string `json:"database_name"`
+			User           string `json:"user"`
+			Password       string `json:"password"`
+			WALArchiveDir  string `json:"wal_archive_dir"`
+			BaseBackupDir  string `json:"base_backup_dir"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &data)
+		}
+
+		go func() {
+			cfg := pitr.PITRConfig{
+				DatabaseType:   data.DatabaseType,
+				ConnectionHost: data.ConnectionHost,
+				ConnectionPort: data.ConnectionPort,
+				DatabaseName:   data.DatabaseName,
+				User:           data.User,
+				Password:       data.Password,
+				WALArchiveDir:  data.WALArchiveDir,
+				BaseBackupDir:  data.BaseBackupDir,
+			}
+
+			walStatus := pitr.GetWALStatus(cfg)
+
+			report := api.PITRStatusReport{
+				ConfigID:        data.ConfigID,
+				DatabaseType:    cfg.DatabaseType,
+				DatabaseName:    cfg.DatabaseName,
+				ConnectionHost:  cfg.ConnectionHost,
+				WALCount:        walStatus.WALArchiveCount,
+				WALSizeBytes:    walStatus.ArchiveDirSizeBytes,
+				CurrentRPOSec:   walStatus.CurrentRPOSeconds,
+				LastWALArchived: walStatus.LastWALArchived,
+				LastBaseBackup:  walStatus.LastBaseBackup,
+				ArchiveDir:      cfg.WALArchiveDir,
+				Status:          "active",
+			}
+
+			if report.ArchiveDir == "" {
+				report.ArchiveDir = "/var/lib/nerdbackup/wal-archive"
+			}
+
+			// Check if WAL archiving appears healthy
+			if walStatus.WALArchiveCount == 0 {
+				report.Status = "not_configured"
+			} else if walStatus.CurrentRPOSeconds > 3600 {
+				// RPO > 1 hour suggests archiving may be stalled
+				report.Status = "error"
+				report.ErrorMessage = fmt.Sprintf("WAL archiving may be stalled: last archive was %d seconds ago", walStatus.CurrentRPOSeconds)
+			}
+
+			log.Info().
+				Int("wal_count", report.WALCount).
+				Int("rpo_seconds", report.CurrentRPOSec).
+				Str("status", report.Status).
+				Msg("PITR status collected")
+
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.Send(ws.Message{
+					Type: "pitr_status_result",
+					Data: report,
+				})
+			}
 		}()
 
 	default:
