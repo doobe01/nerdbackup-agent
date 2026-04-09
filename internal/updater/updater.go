@@ -46,11 +46,20 @@ func New(currentVersion string) *AutoUpdater {
 // Safe to call frequently — internally rate-limited to once per hour.
 // Returns true if an update was installed (caller should restart).
 func (u *AutoUpdater) CheckAndUpdate(ctx context.Context) bool {
+	return u.checkAndUpdate(ctx, false)
+}
+
+// ForceCheckAndUpdate bypasses the rate limit. Use for manual `update` command.
+func (u *AutoUpdater) ForceCheckAndUpdate(ctx context.Context) bool {
+	return u.checkAndUpdate(ctx, true)
+}
+
+func (u *AutoUpdater) checkAndUpdate(ctx context.Context, force bool) bool {
 	if u.currentVersion == "dev" {
 		return false
 	}
 
-	if time.Since(u.lastCheck) < checkInterval {
+	if !force && time.Since(u.lastCheck) < checkInterval {
 		return false
 	}
 	u.lastCheck = time.Now()

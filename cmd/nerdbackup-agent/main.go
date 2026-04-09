@@ -710,34 +710,31 @@ func doctorCmd() *cobra.Command {
 func updateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "update",
-		Short: "Check for available agent updates",
+		Short: "Check for and install agent updates",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("not initialized: %w", err)
-			}
-
 			logging.Init(true, false)
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
+			fmt.Printf("Current version: v%s\n", version)
+			fmt.Println("Checking for updates...")
+
+			u := updater.New(version)
+			// Force check by using a fresh updater (no rate limit on manual command)
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 			defer cancel()
 
-			client := api.NewClient(cfg.APIBaseURL, cfg.AgentID, cfg.AgentToken)
-			info, err := client.GetLatestVersion(ctx)
-			if err != nil {
-				return fmt.Errorf("check for updates: %w", err)
-			}
-
-			if info.Version == version {
-				fmt.Printf("Already up to date (v%s)\n", version)
+			if version == "dev" {
+				fmt.Println("Running development build — skipping update check")
 				return nil
 			}
 
-			fmt.Printf("Update available: v%s → v%s\n", version, info.Version)
-			fmt.Println("Download the latest release from:")
-			for platform, url := range info.Platforms {
-				fmt.Printf("  %s: %s\n", platform, url)
+			if u.ForceCheckAndUpdate(ctx) {
+				fmt.Println("✓ Update installed! Restart the agent to use the new version.")
+				fmt.Println("  Windows: Restart-Service NerdBackupAgent")
+				fmt.Println("  Linux:   systemctl --user restart nerdbackup-agent")
+				return nil
 			}
-			fmt.Println("\nOr run: curl -sSL https://nerdbackup.com/install.sh | sh")
+
+			fmt.Printf("Already up to date (v%s)\n", version)
 			return nil
 		},
 	}
