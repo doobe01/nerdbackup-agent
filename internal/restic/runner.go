@@ -55,13 +55,18 @@ func (r *Runner) UnlockIfStale(ctx context.Context, maxAge time.Duration) error 
 		return unlockErr
 	}
 
+	// restic list locks --json outputs one hash per line, not a JSON array.
+	// If output is empty or just hashes, there are no structured locks to check.
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" || trimmed == "null" || trimmed == "[]" {
+		return nil // No locks
+	}
+
 	var locks []Lock
 	if err := json.Unmarshal(out, &locks); err != nil {
-		// Restic may return lock IDs as plain strings, not JSON array
-		// Try blanket unlock if parse fails
-		logging.Log.Debug().Msg("Could not parse locks, attempting unlock")
-		_, unlockErr := r.run(ctx, "unlock")
-		return unlockErr
+		// Output is lock IDs (hashes), not JSON lock objects — just return.
+		// Stale locks were already cleared by the caller via UnlockIfStale(0).
+		return nil
 	}
 
 	cutoff := time.Now().Add(-maxAge)
