@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -468,6 +470,101 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 						"request_id": fsData.RequestID,
 						"path":       path,
 						"entries":    entries,
+					},
+				})
+			}
+		}()
+
+	case "fs_search":
+		var searchData struct {
+			RequestID string `json:"request_id"`
+			Path      string `json:"path"`
+			Pattern   string `json:"pattern"`
+			MaxDepth  int    `json:"max_depth"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &searchData)
+		}
+
+		go func() {
+			root := searchData.Path
+			if root == "" {
+				if runtime.GOOS == "windows" {
+					root = "C:\\"
+				} else {
+					root = "/"
+				}
+			}
+			maxDepth := searchData.MaxDepth
+			if maxDepth <= 0 {
+				maxDepth = 5
+			}
+			pattern := strings.ToLower(searchData.Pattern)
+			if pattern == "" {
+				if s.wsClient != nil && s.wsClient.IsConnected() {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "fs_search_response",
+						Data: map[string]interface{}{
+							"request_id": searchData.RequestID,
+							"error":      "search pattern is required",
+							"results":    []interface{}{},
+						},
+					})
+				}
+				return
+			}
+
+			var results []map[string]interface{}
+			maxResults := 50
+
+			var walk func(dir string, depth int)
+			walk = func(dir string, depth int) {
+				if depth > maxDepth || len(results) >= maxResults {
+					return
+				}
+				dirEntries, err := os.ReadDir(dir)
+				if err != nil {
+					return // skip unreadable directories
+				}
+				for _, e := range dirEntries {
+					if len(results) >= maxResults {
+						return
+					}
+					name := e.Name()
+					fullPath := filepath.Join(dir, name)
+					if strings.Contains(strings.ToLower(name), pattern) {
+						entryType := "file"
+						if e.IsDir() {
+							entryType = "dir"
+						}
+						size := int64(0)
+						if info, infoErr := e.Info(); infoErr == nil {
+							size = info.Size()
+						}
+						results = append(results, map[string]interface{}{
+							"name": name,
+							"path": fullPath,
+							"type": entryType,
+							"size": size,
+						})
+					}
+					if e.IsDir() {
+						walk(fullPath, depth+1)
+					}
+				}
+			}
+
+			walk(root, 0)
+
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.Send(ws.Message{
+					Type: "fs_search_response",
+					Data: map[string]interface{}{
+						"request_id": searchData.RequestID,
+						"root":       root,
+						"pattern":    searchData.Pattern,
+						"results":    results,
+						"truncated":  len(results) >= maxResults,
 					},
 				})
 			}
