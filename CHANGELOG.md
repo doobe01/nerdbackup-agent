@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- `fs_mkdir` WebSocket command — allows dashboard/restore modal to create directories on the agent machine via `os.MkdirAll` (creates parent directories as needed)
 - PITR (Point-in-Time Recovery) command handlers: `pitr_setup`, `pitr_base_backup`, `pitr_restore`, `pitr_status` WebSocket commands
 - WAL file uploader (`internal/pitr/uploader.go`) — watches WAL archive directory and uploads new files to S3 via restic with `pitr-wal` tags
 - PITR restore engine (`internal/pitr/restore.go`) — restores base backup + WAL files from restic, configures PostgreSQL recovery, supports both PG 12+ (recovery.signal) and older versions (recovery.conf)

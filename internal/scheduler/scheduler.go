@@ -586,6 +586,62 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 			}
 		}()
 
+	case "fs_mkdir":
+		var mkdirData struct {
+			RequestID string `json:"request_id"`
+			Path      string `json:"path"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &mkdirData)
+		}
+
+		go func() {
+			path := mkdirData.Path
+			if path == "" {
+				if s.wsClient != nil && s.wsClient.IsConnected() {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "fs_mkdir_response",
+						Data: map[string]interface{}{
+							"request_id": mkdirData.RequestID,
+							"path":       path,
+							"success":    false,
+							"error":      "path is required",
+						},
+					})
+				}
+				return
+			}
+
+			err := os.MkdirAll(path, 0755)
+			if err != nil {
+				log.Error().Err(err).Str("path", path).Msg("fs_mkdir failed")
+				if s.wsClient != nil && s.wsClient.IsConnected() {
+					_ = s.wsClient.Send(ws.Message{
+						Type: "fs_mkdir_response",
+						Data: map[string]interface{}{
+							"request_id": mkdirData.RequestID,
+							"path":       path,
+							"success":    false,
+							"error":      err.Error(),
+						},
+					})
+				}
+				return
+			}
+
+			log.Info().Str("path", path).Msg("fs_mkdir succeeded")
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.Send(ws.Message{
+					Type: "fs_mkdir_response",
+					Data: map[string]interface{}{
+						"request_id": mkdirData.RequestID,
+						"path":       path,
+						"success":    true,
+					},
+				})
+			}
+		}()
+
 	case "config_update":
 		// Force an immediate config re-sync
 		log.Info().Msg("Config update command received, triggering re-sync")
