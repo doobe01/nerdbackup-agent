@@ -487,17 +487,23 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 		}
 
 		go func() {
-			root := searchData.Path
-			if root == "" {
-				if runtime.GOOS == "windows" {
-					root = "C:\\"
-				} else {
-					root = "/"
+			roots := []string{}
+			if searchData.Path != "" {
+				roots = append(roots, searchData.Path)
+			} else if runtime.GOOS == "windows" {
+				// Search all available drives
+				for _, drive := range "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+					r := string(drive) + ":\\"
+					if _, err := os.Stat(r); err == nil {
+						roots = append(roots, r)
+					}
 				}
+			} else {
+				roots = append(roots, "/")
 			}
 			maxDepth := searchData.MaxDepth
 			if maxDepth <= 0 {
-				maxDepth = 5
+				maxDepth = 8
 			}
 			pattern := strings.ToLower(searchData.Pattern)
 			if pattern == "" {
@@ -554,14 +560,24 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 				}
 			}
 
-			walk(root, 0)
+			for _, root := range roots {
+				if len(results) >= maxResults {
+					break
+				}
+				walk(root, 0)
+			}
+
+			rootDisplay := searchData.Path
+			if rootDisplay == "" {
+				rootDisplay = "all drives"
+			}
 
 			if s.wsClient != nil && s.wsClient.IsConnected() {
 				_ = s.wsClient.Send(ws.Message{
 					Type: "fs_search_response",
 					Data: map[string]interface{}{
 						"request_id": searchData.RequestID,
-						"root":       root,
+						"root":       rootDisplay,
 						"pattern":    searchData.Pattern,
 						"results":    results,
 						"truncated":  len(results) >= maxResults,
