@@ -1277,6 +1277,15 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 			report.Files = fileList
 		}
 
+		// Get real dedup/compression stats from restic
+		if sizeStats, statsErr := runner.SizeStats(backupCtx); statsErr == nil {
+			report.Stats.RepoRawSize = sizeStats.RawSize
+			report.Stats.RepoRestoreSize = sizeStats.RestoreSize
+			log.Info().Int64("raw", sizeStats.RawSize).Int64("restore", sizeStats.RestoreSize).Msg("Repo size stats")
+		} else {
+			log.Warn().Err(statsErr).Msg("Failed to get repo size stats")
+		}
+
 		// Update last backup time
 		s.cfg.LastBackupAt = completedAt.Format(time.RFC3339)
 		_ = config.Save(s.cfg)

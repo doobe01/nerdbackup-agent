@@ -49,6 +49,12 @@ type RepoStats struct {
 	TotalFileCount int   `json:"total_file_count"`
 }
 
+// RepoSizeStats holds both raw (on-disk) and restore (logical) sizes.
+type RepoSizeStats struct {
+	RawSize     int64 `json:"raw_size"`     // actual bytes on disk (restic stats --mode raw-data)
+	RestoreSize int64 `json:"restore_size"` // total bytes if fully restored (restic stats --mode restore-size)
+}
+
 // Lock represents a restic lock entry.
 type Lock struct {
 	Time      time.Time `json:"time"`

@@ -100,6 +100,8 @@ type JobStats struct {
 	TotalFilesProcessed int   `json:"total_files_processed"`
 	TotalBytesProcessed int64 `json:"total_bytes_processed"`
 	TotalDurationSec    int   `json:"total_duration_seconds"`
+	RepoRawSize         int64 `json:"repo_raw_size,omitempty"`     // actual bytes on disk (restic stats --mode raw-data)
+	RepoRestoreSize     int64 `json:"repo_restore_size,omitempty"` // total bytes if fully restored (restic stats --mode restore-size)
 }
 
 // Progress report (sent during backup)

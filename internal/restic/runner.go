@@ -268,6 +268,33 @@ func (r *Runner) Stats(ctx context.Context) (*RepoStats, error) {
 	return &stats, nil
 }
 
+// SizeStats runs restic stats in both modes to get true dedup/compression ratio.
+// raw-data = actual bytes stored on disk, restore-size = logical size of all data.
+func (r *Runner) SizeStats(ctx context.Context) (*RepoSizeStats, error) {
+	rawOut, err := r.run(ctx, "stats", "--mode", "raw-data", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("raw-data stats: %w", err)
+	}
+	var rawStats RepoStats
+	if err := json.Unmarshal(rawOut, &rawStats); err != nil {
+		return nil, fmt.Errorf("parse raw-data: %w", err)
+	}
+
+	restoreOut, err := r.run(ctx, "stats", "--mode", "restore-size", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("restore-size stats: %w", err)
+	}
+	var restoreStats RepoStats
+	if err := json.Unmarshal(restoreOut, &restoreStats); err != nil {
+		return nil, fmt.Errorf("parse restore-size: %w", err)
+	}
+
+	return &RepoSizeStats{
+		RawSize:     rawStats.TotalSize,
+		RestoreSize: restoreStats.TotalSize,
+	}, nil
+}
+
 // Version returns the restic version string.
 func (r *Runner) Version(ctx context.Context) string {
 	out, err := r.run(ctx, "version")
