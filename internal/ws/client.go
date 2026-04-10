@@ -68,6 +68,7 @@ type Client struct {
 	agentID   string
 	conn      *websocket.Conn
 	mu        sync.RWMutex
+	writeMu   sync.Mutex // serializes writes to prevent concurrent wsjson.Write
 	connected bool
 	onCommand func(Command)
 }
@@ -210,6 +211,7 @@ func (c *Client) readLoop(ctx context.Context) {
 }
 
 // Send sends a JSON message to the server.
+// Thread-safe: serialized via writeMu to prevent concurrent writes.
 func (c *Client) Send(msg Message) error {
 	c.mu.RLock()
 	conn := c.conn
@@ -219,6 +221,9 @@ func (c *Client) Send(msg Message) error {
 	if !connected || conn == nil {
 		return ErrNotConnected
 	}
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

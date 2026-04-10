@@ -34,7 +34,7 @@ type Scheduler struct {
 	wsClient     *ws.Client                // optional WebSocket client for real-time progress
 	cancelFuncs  map[string]context.CancelFunc // job ID → cancel function for running backups
 	runningPIDs  map[string]int                // job ID → restic PID for pause/resume
-	mu           sync.Mutex                    // protects cancelFuncs + runningPIDs
+	mu           sync.Mutex                    // protects cancelFuncs, runningPIDs, and lastRepos
 }
 
 // New creates a scheduler.
@@ -81,12 +81,16 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 
 		// Find the repo and run backup in background
 		go func() {
+			s.mu.Lock()
 			repos := s.lastRepos
+			s.mu.Unlock()
 			if len(repos) == 0 {
 				// Force a config sync — repo might have just been created
 				log.Info().Msg("No repos cached, forcing config sync")
 				s.syncAndSchedule(context.Background())
+				s.mu.Lock()
 				repos = s.lastRepos
+				s.mu.Unlock()
 			}
 			if len(repos) == 0 {
 				log.Warn().Msg("No repos configured, cannot start backup")
@@ -885,13 +889,17 @@ func (s *Scheduler) syncAndSchedule(ctx context.Context) {
 			}
 		}
 
+		s.mu.Lock()
 		s.lastRepos = repos
+		s.mu.Unlock()
 	}
 
 	// Only check polling queues when WebSocket is NOT connected.
 	// When WS is connected, commands arrive instantly — no need to poll.
 	if s.wsClient == nil || !s.wsClient.IsConnected() {
+		s.mu.Lock()
 		activeRepos := s.lastRepos
+		s.mu.Unlock()
 		if len(activeRepos) == 0 {
 			activeRepos = repos
 		}
