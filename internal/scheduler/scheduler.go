@@ -1045,17 +1045,24 @@ func (s *Scheduler) syncAndSchedule(ctx context.Context) {
 			s.cron.Remove(entry.ID)
 		}
 
-		for _, repo := range repos {
-			if repo.ScheduleCron == "" {
-				continue
+		// Only schedule local cron as fallback when WebSocket is NOT connected.
+		// When WS is connected, the server scheduler sends start_backup commands
+		// with a dashboard_job_id, avoiding orphan jobs.
+		if s.wsClient == nil || !s.wsClient.IsConnected() {
+			for _, repo := range repos {
+				if repo.ScheduleCron == "" {
+					continue
+				}
+				r := repo // capture
+				_, err := s.cron.AddFunc(r.ScheduleCron, func() {
+					s.runBackup(ctx, r)
+				})
+				if err != nil {
+					logging.Log.Error().Err(err).Str("repo", r.ID).Str("cron", r.ScheduleCron).Msg("Invalid cron expression")
+				}
 			}
-			r := repo // capture
-			_, err := s.cron.AddFunc(r.ScheduleCron, func() {
-				s.runBackup(ctx, r)
-			})
-			if err != nil {
-				logging.Log.Error().Err(err).Str("repo", r.ID).Str("cron", r.ScheduleCron).Msg("Invalid cron expression")
-			}
+		} else {
+			logging.Log.Debug().Msg("WebSocket connected — server scheduler handles cron, skipping local cron")
 		}
 
 		s.mu.Lock()
