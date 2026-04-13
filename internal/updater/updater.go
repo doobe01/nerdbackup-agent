@@ -1,10 +1,12 @@
 package updater
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bufio"
 	"bytes"
 	"compress/bzip2"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -179,6 +181,10 @@ func downloadAndReplace(ctx context.Context, release *GitHubRelease) error {
 		if err := extractFromZip(archiveData, binaryName, tmpPath); err != nil {
 			return err
 		}
+	} else if strings.HasSuffix(assetURL, ".tar.gz") || strings.HasSuffix(assetURL, ".tgz") {
+		if err := extractFromTarGz(archiveData, binaryName, tmpPath); err != nil {
+			return err
+		}
 	} else {
 		if err := extractFromBz2(archiveData, tmpPath); err != nil {
 			return err
@@ -252,6 +258,42 @@ func extractFromBz2(data []byte, destPath string) error {
 
 	_, err = io.Copy(out, bzReader)
 	return err
+}
+
+func extractFromTarGz(data []byte, targetName, destPath string) error {
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("open gzip: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	target := strings.ToLower(targetName)
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar: %w", err)
+		}
+
+		name := strings.ToLower(filepath.Base(hdr.Name))
+		if name == target || strings.TrimSuffix(name, ".exe") == strings.TrimSuffix(target, ".exe") {
+			out, err := os.Create(destPath)
+			if err != nil {
+				return err
+			}
+			defer out.Close()
+			if _, err := io.Copy(out, tr); err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%s not found in tar.gz", targetName)
 }
 
 // verifyChecksum downloads the checksums.txt from the release and verifies
