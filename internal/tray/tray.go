@@ -1,4 +1,4 @@
-package main
+package tray
 
 import (
 	"encoding/json"
@@ -25,9 +25,8 @@ const (
 )
 
 var (
-	version = "dev"
+	agentVersion string
 
-	// Menu items (set in onReady).
 	mStatus     *systray.MenuItem
 	mLastBackup *systray.MenuItem
 	mBackupNow  *systray.MenuItem
@@ -46,7 +45,9 @@ var (
 	httpClient = &http.Client{Timeout: httpTimeout}
 )
 
-func main() {
+// Run starts the system tray application. Blocks until the user quits.
+func Run(version string) {
+	agentVersion = version
 	systray.Run(onReady, onExit)
 }
 
@@ -55,13 +56,11 @@ func onReady() {
 	systray.SetTitle("NerdBackup")
 	systray.SetTooltip("NerdBackup Agent — Connecting...")
 
-	// Title (disabled — informational only).
 	mTitle := systray.AddMenuItem("NerdBackup Agent", "")
 	mTitle.Disable()
 
 	systray.AddSeparator()
 
-	// Status section.
 	mStatus = systray.AddMenuItem("● Connecting...", "Agent status")
 	mStatus.Disable()
 	mLastBackup = systray.AddMenuItem("Last backup: —", "")
@@ -69,41 +68,32 @@ func onReady() {
 
 	systray.AddSeparator()
 
-	// Actions.
 	mBackupNow = systray.AddMenuItem("Back Up Now", "Trigger a backup")
 	mDashboard = systray.AddMenuItem("Open Dashboard", "Open NerdBackup dashboard in browser")
 	mLogs = systray.AddMenuItem("View Logs", "Open agent log file")
 
 	systray.AddSeparator()
 
-	// Service control.
 	mStart = systray.AddMenuItem("Start Service", "Start the agent service")
 	mStop = systray.AddMenuItem("Stop Service", "Stop the agent service")
 	mRestart = systray.AddMenuItem("Restart Service", "Restart the agent service")
 
 	systray.AddSeparator()
 
-	// Update and about.
 	mUpdate = systray.AddMenuItem("Check for Updates", "")
-	mAbout = systray.AddMenuItem(fmt.Sprintf("About (v%s)", version), "")
+	mAbout = systray.AddMenuItem(fmt.Sprintf("About (v%s)", agentVersion), "")
 	mAbout.Disable()
 
 	systray.AddSeparator()
 
 	mQuit = systray.AddMenuItem("Quit", "Quit the tray app")
 
-	// Start polling the local API.
 	go pollLoop()
-
-	// Handle menu clicks.
 	go handleClicks()
 }
 
-func onExit() {
-	// Cleanup — nothing to do for now.
-}
+func onExit() {}
 
-// handleClicks dispatches menu item click events.
 func handleClicks() {
 	for {
 		select {
@@ -127,17 +117,11 @@ func handleClicks() {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Polling
-// ---------------------------------------------------------------------------
-
 func pollLoop() {
 	for {
 		status := fetchStatus()
 		if status != nil {
 			updateUI(status)
-
-			// Notify on status transitions.
 			if lastStatus != nil {
 				if lastWasOnline && !status.Online {
 					_ = beeep.Notify("NerdBackup", "Agent went offline", "")
@@ -146,18 +130,15 @@ func pollLoop() {
 					_ = beeep.Notify("NerdBackup", "Agent is online", "")
 				}
 			}
-
 			lastWasOnline = status.Online
 			lastStatus = status
 		} else {
-			// Agent local API not reachable.
 			systray.SetIcon(iconOffline)
 			mStatus.SetTitle("● Agent not running")
 			systray.SetTooltip("NerdBackup Agent — Not running")
 			lastWasOnline = false
 		}
 
-		// Check if a backup is currently running.
 		progress := fetchProgress()
 		if progress != nil && progress.Running {
 			systray.SetIcon(iconBusy)
@@ -176,7 +157,6 @@ func fetchStatus() *localapi.AgentStatus {
 		return nil
 	}
 	defer resp.Body.Close()
-
 	var status localapi.AgentStatus
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		return nil
@@ -184,9 +164,8 @@ func fetchStatus() *localapi.AgentStatus {
 	return &status
 }
 
-// progressResponse mirrors the JSON returned by GET /progress.
 type progressResponse struct {
-	Running  bool                    `json:"running"`
+	Running  bool                     `json:"running"`
 	Progress *localapi.BackupProgress `json:"progress,omitempty"`
 }
 
@@ -196,7 +175,6 @@ func fetchProgress() *progressResponse {
 		return nil
 	}
 	defer resp.Body.Close()
-
 	var p progressResponse
 	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
 		return nil
@@ -214,7 +192,6 @@ func updateUI(status *localapi.AgentStatus) {
 		mStatus.SetTitle("● Offline")
 		systray.SetTooltip("NerdBackup Agent — Offline")
 	}
-
 	if status.LastBackupAt != "" {
 		mLastBackup.SetTitle("Last backup: " + formatRelative(status.LastBackupAt))
 	} else {
@@ -222,33 +199,24 @@ func updateUI(status *localapi.AgentStatus) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Actions
-// ---------------------------------------------------------------------------
-
 func triggerBackup() {
-	// Fetch repo list and trigger the first one.
 	resp, err := httpClient.Get(apiBase + "/repos")
 	if err != nil {
 		_ = beeep.Notify("NerdBackup", "Cannot connect to agent", "")
 		return
 	}
 	defer resp.Body.Close()
-
 	var repos []localapi.RepoStatus
 	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil || len(repos) == 0 {
 		_ = beeep.Notify("NerdBackup", "No repos configured", "")
 		return
 	}
-
-	// Trigger the first repo.
 	triggerResp, err := httpClient.Post(apiBase+"/backup/"+repos[0].ID, "application/json", nil)
 	if err != nil {
 		_ = beeep.Notify("NerdBackup", "Failed to trigger backup", "")
 		return
 	}
 	defer triggerResp.Body.Close()
-
 	_ = beeep.Notify("NerdBackup", "Backup started for "+strings.Join(repos[0].Paths, ", "), "")
 }
 
@@ -261,20 +229,6 @@ func openDashboard() {
 }
 
 func openLogs() {
-	// Try the local API first — it returns the actual log path.
-	resp, err := httpClient.Get(apiBase + "/logs?lines=1")
-	if err == nil {
-		defer resp.Body.Close()
-		var result struct {
-			Path string `json:"path"`
-		}
-		if json.NewDecoder(resp.Body).Decode(&result) == nil && result.Path != "" {
-			openFileInEditor(result.Path)
-			return
-		}
-	}
-
-	// Fallback: derive log path from known defaults.
 	home, _ := os.UserHomeDir()
 	logPath := home + "/.nerdbackup/agent.log"
 	openFileInEditor(logPath)
@@ -287,7 +241,6 @@ func openFileInEditor(path string) {
 	case "darwin":
 		_ = exec.Command("open", "-a", "Console", path).Start()
 	default:
-		// Linux: try xdg-open first, then fall back to xterm+less.
 		if err := exec.Command("xdg-open", path).Start(); err != nil {
 			_ = exec.Command("xterm", "-e", "less", path).Start()
 		}
@@ -305,17 +258,12 @@ func controlService(fn func() error, verb string) {
 func checkUpdate() {
 	cfg, err := config.Load()
 	if err != nil {
-		_ = beeep.Notify("NerdBackup", "Cannot load config — is the agent initialized?", "")
+		_ = beeep.Notify("NerdBackup", "Cannot load config", "")
 		return
 	}
-
-	msg := fmt.Sprintf("Current version: v%s\nAgent: %s\nRun 'nerdbackup-agent update' to check for updates.", version, cfg.AgentID)
-	_ = beeep.Notify("NerdBackup", msg, "")
+	_ = cfg
+	_ = beeep.Notify("NerdBackup", fmt.Sprintf("Current: v%s\nRun 'nerdbackup-agent update' to check", agentVersion), "")
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 func openBrowser(url string) {
 	var cmd *exec.Cmd

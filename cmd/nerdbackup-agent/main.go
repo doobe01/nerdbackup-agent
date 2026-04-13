@@ -21,6 +21,7 @@ import (
 	"github.com/doobe01/nerdbackup-agent/internal/restic"
 	"github.com/doobe01/nerdbackup-agent/internal/scheduler"
 	"github.com/doobe01/nerdbackup-agent/internal/service"
+	"github.com/doobe01/nerdbackup-agent/internal/tray"
 	"github.com/doobe01/nerdbackup-agent/internal/updater"
 	"github.com/doobe01/nerdbackup-agent/internal/ws"
 	"github.com/spf13/cobra"
@@ -56,6 +57,7 @@ func main() {
 	root.AddCommand(installServiceCmd())
 	root.AddCommand(serviceCmd())
 	root.AddCommand(dockerDiscoverCmd())
+	root.AddCommand(trayCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -940,4 +942,16 @@ func orDefault(val, def string) string {
 		return def
 	}
 	return val
+}
+
+func trayCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "tray",
+		Short: "Launch the system tray application",
+		Long:  "Starts a system tray icon for monitoring and controlling the NerdBackup agent. Requires a desktop environment.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tray.Run(version)
+			return nil
+		},
+	}
 }
