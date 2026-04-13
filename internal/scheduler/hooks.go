@@ -1,5 +1,12 @@
 package scheduler
 
+// Trust model for hooks:
+// Pre/post backup hooks execute arbitrary shell commands via "sh -c".
+// These hooks are configured by the authenticated user who owns the agent,
+// delivered via the NerdBackup API config sync (HTTPS + agent token auth).
+// They are trusted the same way SSH access or crontab entries are trusted —
+// the user has full control over what runs on their own machine.
+
 import (
 	"context"
 	"fmt"
@@ -17,7 +24,7 @@ func runPreHook(ctx context.Context, command string) error {
 		return nil
 	}
 
-	logging.Log.Info().Str("command", command).Msg("Running pre-backup hook")
+	logging.Log.Info().Str("command", command).Msg("Running pre-backup hook (shell execution)")
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -40,7 +47,7 @@ func runPostHook(ctx context.Context, command string, status string, snapshotID 
 		return
 	}
 
-	logging.Log.Info().Str("command", command).Msg("Running post-backup hook")
+	logging.Log.Info().Str("command", command).Msg("Running post-backup hook (shell execution)")
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()

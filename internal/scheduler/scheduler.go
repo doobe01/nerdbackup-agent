@@ -37,6 +37,7 @@ type Scheduler struct {
 	cancelFuncs  map[string]context.CancelFunc // job ID → cancel function for running backups
 	runningPIDs  map[string]int                // job ID → restic PID for pause/resume
 	mu           sync.Mutex                    // protects cancelFuncs, runningPIDs, and lastRepos
+	ctx          context.Context               // parent context for graceful shutdown
 }
 
 // New creates a scheduler.
@@ -89,7 +90,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 			if len(repos) == 0 {
 				// Force a config sync — repo might have just been created
 				log.Info().Msg("No repos cached, forcing config sync")
-				s.syncAndSchedule(context.Background())
+				s.syncAndSchedule(s.ctx)
 				s.mu.Lock()
 				repos = s.lastRepos
 				s.mu.Unlock()
@@ -114,7 +115,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 				return
 			}
 
-			ctx := context.Background()
+			ctx := s.ctx
 			// Ensure repo is ready (init if needed, clear stale locks)
 			if err := s.ensureRepoReady(ctx, *targetRepo); err != nil {
 				log.Error().Err(err).Msg("Repo not ready — cannot start backup")
@@ -234,7 +235,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 		go func() {
 			repos := s.lastRepos
 			if len(repos) == 0 {
-				s.syncAndSchedule(context.Background())
+				s.syncAndSchedule(s.ctx)
 				repos = s.lastRepos
 			}
 			if len(repos) == 0 {
@@ -244,7 +245,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 
 			targetRepo := &repos[0]
 			runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
-			ctx := context.Background()
+			ctx := s.ctx
 
 			log.Info().Str("snapshot", restoreData.SnapshotID).Str("target", restoreData.TargetPath).Msg("Starting restore via WebSocket")
 			err := runner.Restore(ctx, restoreData.SnapshotID, restoreData.TargetPath, restoreData.IncludePaths, restoreData.ExcludePaths)
@@ -286,7 +287,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 		go func() {
 			repos := s.lastRepos
 			if len(repos) == 0 {
-				s.syncAndSchedule(context.Background())
+				s.syncAndSchedule(s.ctx)
 				repos = s.lastRepos
 			}
 			if len(repos) == 0 {
@@ -296,7 +297,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 
 			targetRepo := &repos[0]
 			runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
-			ctx := context.Background()
+			ctx := s.ctx
 
 			log.Info().Str("snapshot", dumpData.SnapshotID).Str("file", dumpData.FilePath).Msg("Dumping file via WebSocket")
 			data, err := runner.Dump(ctx, dumpData.SnapshotID, dumpData.FilePath)
@@ -348,7 +349,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 			}
 
 			runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
-			ctx := context.Background()
+			ctx := s.ctx
 
 			// Forget the specific snapshot
 			if data.SnapshotID != "" {
@@ -646,7 +647,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 		// Force an immediate config re-sync
 		log.Info().Msg("Config update command received, triggering re-sync")
 		go func() {
-			ctx := context.Background()
+			ctx := s.ctx
 			s.syncAndSchedule(ctx)
 		}()
 
@@ -741,7 +742,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 				StartedAt: startedAt.Format(time.RFC3339),
 			}
 
-			ctx := context.Background()
+			ctx := s.ctx
 
 			// Step 1: Run pg_basebackup
 			log.Info().Str("host", cfg.ConnectionHost).Str("db", cfg.DatabaseName).Msg("Starting PITR base backup")
@@ -847,7 +848,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 				StartedAt:  startedAt.Format(time.RFC3339),
 			}
 
-			ctx := context.Background()
+			ctx := s.ctx
 
 			// Parse target time
 			targetTime, parseErr := time.Parse(time.RFC3339, data.TargetTime)
@@ -1002,6 +1003,7 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 
 // Start begins the scheduler loop.
 func (s *Scheduler) Start(ctx context.Context) {
+	s.ctx = ctx // store for goroutines spawned by HandleCommand
 	// Flush any pending reports from previous run
 	s.client.FlushPendingReports(ctx)
 
@@ -1124,7 +1126,7 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 	}
 
 	// Create cancelable context for this backup (so cancel command can stop it)
-	backupCtx, backupCancel := context.WithCancel(ctx)
+	backupCtx, backupCancel := context.WithTimeout(ctx, 24*time.Hour)
 	defer backupCancel()
 
 	if djID != "" {

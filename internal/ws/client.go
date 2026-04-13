@@ -211,14 +211,12 @@ func (c *Client) readLoop(ctx context.Context) {
 }
 
 // Send sends a JSON message to the server.
-// Thread-safe: serialized via writeMu to prevent concurrent writes.
+// Thread-safe: RLock held through entire send to prevent conn becoming nil mid-write.
 func (c *Client) Send(msg Message) error {
 	c.mu.RLock()
-	conn := c.conn
-	connected := c.connected
-	c.mu.RUnlock()
+	defer c.mu.RUnlock()
 
-	if !connected || conn == nil {
+	if !c.connected || c.conn == nil {
 		return ErrNotConnected
 	}
 
@@ -228,7 +226,7 @@ func (c *Client) Send(msg Message) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	return wsjson.Write(ctx, conn, msg)
+	return wsjson.Write(ctx, c.conn, msg)
 }
 
 // SendHeartbeat sends a heartbeat message over WebSocket.

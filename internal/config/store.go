@@ -92,11 +92,11 @@ func CopyToSystemPath() error {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(sysPath), 0777); err != nil {
+	if err := os.MkdirAll(filepath.Dir(sysPath), 0700); err != nil {
 		return err
 	}
 
-	return os.WriteFile(sysPath, data, 0644)
+	return os.WriteFile(sysPath, data, 0600)
 }
 
 // Exists checks if a config file exists.
