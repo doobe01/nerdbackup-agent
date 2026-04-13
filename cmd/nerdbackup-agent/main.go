@@ -21,7 +21,6 @@ import (
 	"github.com/doobe01/nerdbackup-agent/internal/restic"
 	"github.com/doobe01/nerdbackup-agent/internal/scheduler"
 	"github.com/doobe01/nerdbackup-agent/internal/service"
-	"github.com/doobe01/nerdbackup-agent/internal/tray"
 	"github.com/doobe01/nerdbackup-agent/internal/updater"
 	"github.com/doobe01/nerdbackup-agent/internal/ws"
 	"github.com/spf13/cobra"
@@ -57,7 +56,6 @@ func main() {
 	root.AddCommand(installServiceCmd())
 	root.AddCommand(serviceCmd())
 	root.AddCommand(dockerDiscoverCmd())
-	root.AddCommand(trayCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -266,16 +264,6 @@ func runAgent(ctx context.Context, cfg *config.AgentConfig) error {
 	// Start local HTTP API server for system tray and other local tools
 	localServer := localapi.New(sched)
 	localServer.Start(ctx)
-
-	// Launch system tray if a desktop environment is available
-	if hasDisplay() {
-		go func() {
-			logging.Log.Info().Msg("Desktop detected — launching system tray")
-			tray.Run(version)
-		}()
-	} else {
-		logging.Log.Debug().Msg("No desktop environment — skipping system tray")
-	}
 
 	// Heartbeat: send over WebSocket when connected, fall back to HTTP
 	go func() {
@@ -952,29 +940,4 @@ func orDefault(val, def string) string {
 		return def
 	}
 	return val
-}
-
-// hasDisplay checks if a desktop environment is available.
-func hasDisplay() bool {
-	switch runtime.GOOS {
-	case "windows":
-		return true // Windows always has a desktop (even Server has a tray)
-	case "darwin":
-		return true // macOS always has a desktop
-	default:
-		// Linux: check for DISPLAY or WAYLAND_DISPLAY env var
-		return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
-	}
-}
-
-func trayCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "tray",
-		Short: "Launch the system tray application",
-		Long:  "Starts a system tray icon for monitoring and controlling the NerdBackup agent. Requires a desktop environment.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			tray.Run(version)
-			return nil
-		},
-	}
 }
