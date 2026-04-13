@@ -16,6 +16,7 @@ import (
 	"github.com/doobe01/nerdbackup-agent/internal/docker"
 	"github.com/doobe01/nerdbackup-agent/internal/doctor"
 	"github.com/doobe01/nerdbackup-agent/internal/heartbeat"
+	"github.com/doobe01/nerdbackup-agent/internal/localapi"
 	"github.com/doobe01/nerdbackup-agent/internal/logging"
 	"github.com/doobe01/nerdbackup-agent/internal/restic"
 	"github.com/doobe01/nerdbackup-agent/internal/scheduler"
@@ -255,7 +256,14 @@ func runAgent(ctx context.Context, cfg *config.AgentConfig) error {
 	// Expose WS client to scheduler for progress streaming
 	sched.SetWSClient(wsClient)
 
+	// Set version info for local API status endpoint
+	sched.SetVersionInfo(version, resticVersion)
+
 	go sched.Start(ctx)
+
+	// Start local HTTP API server for system tray and other local tools
+	localServer := localapi.New(sched)
+	localServer.Start(ctx)
 
 	// Heartbeat: send over WebSocket when connected, fall back to HTTP
 	go func() {

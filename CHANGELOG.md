@@ -7,6 +7,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- System tray application (`cmd/nerdbackup-tray`) — lightweight GUI companion that sits in the OS notification area and communicates with the running agent via its local HTTP API
+  - Displays real-time agent status (online/offline/busy) with color-coded tray icon (green=online, gray=offline, amber=backup running)
+  - Shows last backup time in relative format ("5m ago", "2h ago")
+  - "Back Up Now" triggers an ad-hoc backup on the first configured repo
+  - "Open Dashboard" launches the NerdBackup web dashboard in the default browser
+  - "View Logs" opens the agent log file in the platform's default text viewer (notepad on Windows, Console.app on macOS, xdg-open on Linux)
+  - Service control: Start/Stop/Restart the agent service directly from the tray menu
+  - Desktop notifications via `beeep` on agent online/offline transitions
+  - "Check for Updates" shows current version and instructions
+  - Polls local API every 5 seconds; shows live backup progress percentage when a backup is running
+  - `make build-tray` target added to Makefile
+  - Uses `getlantern/systray` (requires CGO + GTK/AppIndicator headers on Linux; pure Go on Windows)
+- Local HTTP API server (`internal/localapi`) on `127.0.0.1:19284` — allows the system tray app and other local tools to query agent status, list repos, get live backup progress, trigger backups, and tail logs without needing the NerdBackup API
+- `GET /status` — agent version, online state, uptime, platform, restic version
+- `GET /repos` — list configured repos with idle/running status
+- `GET /progress` — live backup progress (percent, bytes, files, current file)
+- `POST /backup/{repoID}` — trigger an ad-hoc backup for a specific repo
+- `GET /logs?lines=N` — tail the agent log file (default 50 lines, max 500)
 - `fs_mkdir` WebSocket command — allows dashboard/restore modal to create directories on the agent machine via `os.MkdirAll` (creates parent directories as needed)
 - PITR (Point-in-Time Recovery) command handlers: `pitr_setup`, `pitr_base_backup`, `pitr_restore`, `pitr_status` WebSocket commands
 - WAL file uploader (`internal/pitr/uploader.go`) — watches WAL archive directory and uploads new files to S3 via restic with `pitr-wal` tags

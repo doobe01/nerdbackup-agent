@@ -14,6 +14,7 @@ import (
 
 	"github.com/doobe01/nerdbackup-agent/internal/api"
 	"github.com/doobe01/nerdbackup-agent/internal/config"
+	"github.com/doobe01/nerdbackup-agent/internal/localapi"
 	"github.com/doobe01/nerdbackup-agent/internal/logging"
 	"github.com/doobe01/nerdbackup-agent/internal/pitr"
 	"github.com/doobe01/nerdbackup-agent/internal/process"
@@ -34,10 +35,13 @@ type Scheduler struct {
 	cfg          *config.AgentConfig
 	backupCounts map[string]int            // repo ID → backup count since last health check
 	wsClient     *ws.Client                // optional WebSocket client for real-time progress
-	cancelFuncs  map[string]context.CancelFunc // job ID → cancel function for running backups
-	runningPIDs  map[string]int                // job ID → restic PID for pause/resume
-	mu           sync.Mutex                    // protects cancelFuncs, runningPIDs, and lastRepos
-	ctx          context.Context               // parent context for graceful shutdown
+	cancelFuncs     map[string]context.CancelFunc // job ID → cancel function for running backups
+	runningPIDs     map[string]int                // job ID → restic PID for pause/resume
+	currentProgress *localapi.BackupProgress      // live progress of the active backup (nil when idle)
+	version         string                        // agent version, set via SetVersionInfo
+	resticVersion   string                        // restic version, set via SetVersionInfo
+	mu              sync.Mutex                    // protects cancelFuncs, runningPIDs, currentProgress, and lastRepos
+	ctx             context.Context               // parent context for graceful shutdown
 }
 
 // New creates a scheduler.
@@ -60,6 +64,87 @@ func New(client *api.Client, resticBinary, agentID string, cfg *config.AgentConf
 // SetWSClient sets the WebSocket client used for real-time progress streaming.
 func (s *Scheduler) SetWSClient(wsClient *ws.Client) {
 	s.wsClient = wsClient
+}
+
+// SetVersionInfo sets the agent and restic version strings, exposed via the local API.
+func (s *Scheduler) SetVersionInfo(agentVersion, resticVersion string) {
+	s.version = agentVersion
+	s.resticVersion = resticVersion
+}
+
+// GetStatus returns the current agent status for the local API.
+func (s *Scheduler) GetStatus() localapi.AgentStatus {
+	s.mu.Lock()
+	repoCount := len(s.lastRepos)
+	s.mu.Unlock()
+
+	return localapi.AgentStatus{
+		Version:       s.version,
+		AgentID:       s.agentID,
+		AgentName:     s.cfg.Name,
+		Online:        s.wsClient != nil && s.wsClient.IsConnected(),
+		Uptime:        time.Since(s.cfg.StartedAt).Truncate(time.Second).String(),
+		LastBackupAt:  s.cfg.LastBackupAt,
+		RepoCount:     repoCount,
+		Platform:      runtime.GOOS,
+		Arch:          runtime.GOARCH,
+		ResticVersion: s.resticVersion,
+		APIURL:        s.cfg.APIBaseURL,
+	}
+}
+
+// GetRepos returns the status of all configured repos for the local API.
+func (s *Scheduler) GetRepos() []localapi.RepoStatus {
+	s.mu.Lock()
+	repos := s.lastRepos
+	running := make(map[string]bool)
+	for id := range s.cancelFuncs {
+		running[id] = true
+	}
+	s.mu.Unlock()
+
+	result := make([]localapi.RepoStatus, len(repos))
+	for i, r := range repos {
+		status := "idle"
+		// Check if any running job references this repo (cancelFuncs keys are job IDs,
+		// but the currentProgress tracks the repo ID for the active backup)
+		s.mu.Lock()
+		if s.currentProgress != nil && s.currentProgress.RepoID == r.ID {
+			status = "running"
+		}
+		s.mu.Unlock()
+
+		result[i] = localapi.RepoStatus{
+			ID:           r.ID,
+			PolicyID:     r.PolicyID,
+			Paths:        r.Paths,
+			ScheduleCron: r.ScheduleCron,
+			Status:       status,
+		}
+	}
+	return result
+}
+
+// GetProgress returns the live progress of the current backup, or nil if idle.
+func (s *Scheduler) GetProgress() *localapi.BackupProgress {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentProgress
+}
+
+// TriggerBackup starts an ad-hoc backup for the given repo ID via the local API.
+func (s *Scheduler) TriggerBackup(repoID string) error {
+	s.mu.Lock()
+	repos := s.lastRepos
+	s.mu.Unlock()
+
+	for _, r := range repos {
+		if r.ID == repoID {
+			go s.runBackup(s.ctx, r)
+			return nil
+		}
+	}
+	return fmt.Errorf("repo %s not found", repoID)
 }
 
 // HandleCommand processes a command received from the WebSocket server.
@@ -1189,6 +1274,20 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 		tags = append(tags, "nerdbackup:policy_id="+repo.PolicyID)
 	}
 
+	// Set initial progress for local API consumers (tray app, etc.)
+	s.mu.Lock()
+	s.currentProgress = &localapi.BackupProgress{
+		RepoID:    repo.ID,
+		JobID:     djID,
+		StartedAt: startedAt.Format(time.RFC3339),
+	}
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.currentProgress = nil
+		s.mu.Unlock()
+	}()
+
 	// Run backup with progress reporting
 	lastProgressReport := time.Time{}
 	summary, err := runner.Backup(backupCtx, restic.BackupOptions{
@@ -1206,6 +1305,18 @@ func (s *Scheduler) runBackup(ctx context.Context, repo api.RepoConfig, dashboar
 		},
 	}, func(p restic.ProgressEntry) {
 		log.Debug().Float64("percent", p.PercentDone*100).Int64("bytes", p.BytesDone).Msg("Progress")
+
+		// Update local progress for tray app / local API
+		s.mu.Lock()
+		if s.currentProgress != nil {
+			s.currentProgress.PercentDone = p.PercentDone
+			s.currentProgress.BytesDone = p.BytesDone
+			s.currentProgress.FilesDone = p.FilesDone
+			if len(p.CurrentFiles) > 0 {
+				s.currentProgress.CurrentFile = p.CurrentFiles[0]
+			}
+		}
+		s.mu.Unlock()
 
 		// Report progress — prefer WebSocket (instant), fall back to HTTP (best-effort)
 		if time.Since(lastProgressReport) > 5*time.Second {

@@ -1,17 +1,21 @@
 BINARY=nerdbackup-agent
+TRAY_BINARY=nerdbackup-tray
 VERSION?=0.1.0
 LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build run clean test lint fmt vet coverage release install
+.PHONY: build build-tray run clean test lint fmt vet coverage release install
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/nerdbackup-agent
+
+build-tray:
+	go build $(LDFLAGS) -o $(TRAY_BINARY) ./cmd/nerdbackup-tray
 
 run: build
 	./$(BINARY) run
 
 clean:
-	rm -f $(BINARY) coverage.txt
+	rm -f $(BINARY) $(TRAY_BINARY) coverage.txt
 	rm -rf dist/
 
 test:
