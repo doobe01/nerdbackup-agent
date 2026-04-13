@@ -1081,6 +1081,61 @@ func (s *Scheduler) HandleCommand(cmd ws.Command) {
 			}
 		}()
 
+	case "verify_repo":
+		var data struct {
+			RequestID string `json:"request_id"`
+			RepoID    string `json:"repo_id"`
+		}
+		if cmd.Data != nil {
+			_ = json.Unmarshal(cmd.Data, &data)
+		}
+
+		go func() {
+			s.mu.Lock()
+			repos := s.lastRepos
+			s.mu.Unlock()
+
+			var targetRepo *api.RepoConfig
+			for i := range repos {
+				if repos[i].ID == data.RepoID {
+					targetRepo = &repos[i]
+					break
+				}
+			}
+
+			result := map[string]interface{}{
+				"request_id": data.RequestID,
+				"repo_id":    data.RepoID,
+			}
+
+			if targetRepo == nil {
+				result["passed"] = false
+				result["error"] = "repo not found"
+			} else {
+				runner := restic.NewRunner(s.resticBinary, targetRepo.ResticRepoPath, targetRepo.ResticPassword, buildStorageEnv(targetRepo.StorageConfig))
+				log.Info().Str("repo", data.RepoID).Msg("Running restic check for verification")
+
+				output, err := runner.CheckVerbose(s.ctx)
+				if err != nil {
+					result["passed"] = false
+					result["error"] = err.Error()
+					result["output"] = output
+					log.Error().Err(err).Str("repo", data.RepoID).Msg("Restic check failed")
+				} else {
+					result["passed"] = true
+					result["output"] = output
+					log.Info().Str("repo", data.RepoID).Msg("Restic check passed")
+				}
+			}
+
+			if s.wsClient != nil && s.wsClient.IsConnected() {
+				_ = s.wsClient.Send(ws.Message{
+					Type: "verify_result",
+					Data: result,
+				})
+			}
+		}()
+
 	default:
 		log.Warn().Msg("Unknown command action")
 	}

@@ -255,6 +255,12 @@ func (r *Runner) Check(ctx context.Context) error {
 	return err
 }
 
+// CheckVerbose verifies repository integrity and returns the output.
+func (r *Runner) CheckVerbose(ctx context.Context) (string, error) {
+	out, err := r.run(ctx, "check")
+	return string(out), err
+}
+
 // Stats returns repository statistics.
 func (r *Runner) Stats(ctx context.Context) (*RepoStats, error) {
 	out, err := r.run(ctx, "stats", "--json")
