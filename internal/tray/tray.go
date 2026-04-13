@@ -1,4 +1,4 @@
-//go:build cgo
+//go:build !darwin || cgo
 
 package tray
 
@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/gen2brain/beeep"
-	"github.com/getlantern/systray"
+	"github.com/energye/systray"
 
 	"github.com/doobe01/nerdbackup-agent/internal/config"
 	"github.com/doobe01/nerdbackup-agent/internal/localapi"
@@ -50,7 +50,7 @@ var (
 // Run starts the system tray application. Blocks until the user quits.
 func Run(version string) {
 	agentVersion = version
-	systray.Run(onReady, onExit)
+	systray.Run(onReady, func() {})
 }
 
 func onReady() {
@@ -90,33 +90,17 @@ func onReady() {
 
 	mQuit = systray.AddMenuItem("Quit", "Quit the tray app")
 
+	// Register click handlers
+	mBackupNow.Click(func() { go triggerBackup() })
+	mDashboard.Click(func() { go openDashboard() })
+	mLogs.Click(func() { go openLogs() })
+	mStart.Click(func() { go controlService(service.Start, "started") })
+	mStop.Click(func() { go controlService(service.Stop, "stopped") })
+	mRestart.Click(func() { go controlService(service.Restart, "restarted") })
+	mUpdate.Click(func() { go checkUpdate() })
+	mQuit.Click(func() { systray.Quit() })
+
 	go pollLoop()
-	go handleClicks()
-}
-
-func onExit() {}
-
-func handleClicks() {
-	for {
-		select {
-		case <-mBackupNow.ClickedCh:
-			go triggerBackup()
-		case <-mDashboard.ClickedCh:
-			go openDashboard()
-		case <-mLogs.ClickedCh:
-			go openLogs()
-		case <-mStart.ClickedCh:
-			go controlService(service.Start, "started")
-		case <-mStop.ClickedCh:
-			go controlService(service.Stop, "stopped")
-		case <-mRestart.ClickedCh:
-			go controlService(service.Restart, "restarted")
-		case <-mUpdate.ClickedCh:
-			go checkUpdate()
-		case <-mQuit.ClickedCh:
-			systray.Quit()
-		}
-	}
 }
 
 func pollLoop() {
