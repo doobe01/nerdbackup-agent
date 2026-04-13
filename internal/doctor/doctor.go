@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/doobe01/nerdbackup-agent/internal/api"
@@ -115,8 +116,8 @@ func checkToken(ctx context.Context, client *api.Client) CheckResult {
 	_, err := client.SendHeartbeat(ctx, api.HeartbeatRequest{
 		AgentVersion:  "doctor",
 		ResticVersion: "check",
-		Platform:      "check",
-		Arch:          "check",
+		Platform:      runtime.GOOS,
+		Arch:          runtime.GOARCH,
 		Hostname:      "doctor-check",
 	})
 	if err != nil {
