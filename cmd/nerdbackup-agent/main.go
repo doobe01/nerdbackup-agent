@@ -267,6 +267,16 @@ func runAgent(ctx context.Context, cfg *config.AgentConfig) error {
 	localServer := localapi.New(sched)
 	localServer.Start(ctx)
 
+	// Launch system tray if a desktop environment is available
+	if hasDisplay() {
+		go func() {
+			logging.Log.Info().Msg("Desktop detected — launching system tray")
+			tray.Run(version)
+		}()
+	} else {
+		logging.Log.Debug().Msg("No desktop environment — skipping system tray")
+	}
+
 	// Heartbeat: send over WebSocket when connected, fall back to HTTP
 	go func() {
 		hostname, _ := os.Hostname()
@@ -942,6 +952,19 @@ func orDefault(val, def string) string {
 		return def
 	}
 	return val
+}
+
+// hasDisplay checks if a desktop environment is available.
+func hasDisplay() bool {
+	switch runtime.GOOS {
+	case "windows":
+		return true // Windows always has a desktop (even Server has a tray)
+	case "darwin":
+		return true // macOS always has a desktop
+	default:
+		// Linux: check for DISPLAY or WAYLAND_DISPLAY env var
+		return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+	}
 }
 
 func trayCmd() *cobra.Command {
